@@ -10,7 +10,14 @@ vi.mock("./antelope", async (orig) => {
 });
 
 const antelope = await import("./antelope");
-const { forgetSecret, hasSecret, importSecret, signDigest } = await import("./secret");
+const {
+  discardParsedKey,
+  forgetSecret,
+  hasSecret,
+  importParsedSecret,
+  importSecret,
+  signDigest,
+} = await import("./secret");
 
 // A throwaway key generated per run — no key material lives in the repo.
 // (The parser routes strings starting with "5" to the WIF decoder, so skip those.)
@@ -54,5 +61,30 @@ describe("session key zeroization", () => {
     forgetSecret();
     forgetSecret();
     expect(hasSecret()).toBe(false);
+  });
+
+  it("importParsedSecret holds the given pair without re-parsing", () => {
+    const kp = antelope.parsePrivateKey(freshHexKey());
+    const callsBefore = vi.mocked(antelope.parsePrivateKey).mock.calls.length;
+    importParsedSecret(kp);
+    expect(vi.mocked(antelope.parsePrivateKey).mock.calls.length).toBe(callsBefore);
+    expect(hasSecret()).toBe(true);
+    forgetSecret();
+    expect(kp.privateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it("discardParsedKey zeros a pair that is not the held secret", () => {
+    const kp = antelope.parsePrivateKey(freshHexKey());
+    expect(kp.privateKey.some((b) => b !== 0)).toBe(true);
+    discardParsedKey(kp);
+    expect(kp.privateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it("discardParsedKey does not wipe the held secret", () => {
+    importSecret(freshHexKey());
+    const held = lastParsed();
+    discardParsedKey(held);
+    expect(hasSecret()).toBe(true);
+    expect(held.privateKey.some((b) => b !== 0)).toBe(true);
   });
 });

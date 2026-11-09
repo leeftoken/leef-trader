@@ -6,7 +6,9 @@
   held in a **module-level variable only**. They are never written to
   localStorage/IndexedDB, never transmitted, never logged, and never included
   in persisted zustand state (`partialize` excludes them). Refreshing or
-  closing the tab forgets the key.
+  closing the tab forgets the key. Import parses the key **once**; a failed
+  lookup or a closed dialog zeroizes the parsed bytes instead of leaving a
+  second copy on the heap.
 - WAX Cloud Wallet / Anchor sessions go through Wharfkit
   (`wallet/session.ts`); the page never sees a key at all — the wallet signs.
 - The custom signer (`wallet/antelope.ts`, noble secp256k1) self-verifies
@@ -149,11 +151,18 @@ signs with its own permission; Anchor lets you pick one.
 - All market/chain data comes from public endpoints over HTTPS; JSON is
   parsed, never rendered as HTML. No `dangerouslySetInnerHTML` anywhere.
 - Nostr keys (template shell) are separate from WAX keys and can never sign
-  WAX transactions.
+  WAX transactions. Nostr metadata URLs (`picture`, etc.) are passed through
+  `sanitizeUrl()` (https-only) before they become `src` / `href`.
+- Custom WAX RPC / Hyperion URLs in `leef-wax-endpoints` are a **trust**
+  surface: a malicious node can lie on reads and see signed transactions on
+  broadcast. Keys are never sent. Wrong chain id is rejected. Prefer `https://`.
 
 ## What we explicitly do NOT do
 
-- No backend holds keys. There is no server component.
+- No backend holds keys. Serverless functions (`api/jev`, `api/token-risk`)
+  proxy TypeSafe with a server env key; they never see WAX session keys.
 - No telemetry/analytics contains wallet or trade data.
-- No AI provider receives key material (AI trading integration is PLANNED and
-  will be advisory-only: it will never sign or bypass the risk/policy layer).
+- No AI provider receives key material. The optional Jev CONTROL seam
+  (default OFF, confirm-gated) may send balances, position size/USD, and
+  strategy to TypeSafe via `/api/jev`. It cannot sign, suppress protective
+  exits, or bypass the policy firewall.

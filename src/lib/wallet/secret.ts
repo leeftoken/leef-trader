@@ -28,11 +28,29 @@ export function describeKey(kp: AntelopeKeyPair): { publicKey: string; legacy: s
 }
 
 export function importSecret(raw: string): { publicKey: string; legacy: string } {
-  const kp = parseAntelopeKey(raw);
+  return importParsedSecret(parseAntelopeKey(raw));
+}
+
+/**
+ * Hold an already-parsed key pair as the session secret. Import UI parses
+ * once (to look up the account) then transfers that same object here so a
+ * second copy is never left on the heap.
+ */
+export function importParsedSecret(kp: AntelopeKeyPair): { publicKey: string; legacy: string } {
   // Replacing a key must not leave the previous one's bytes behind.
   if (secret && secret !== kp) secret.privateKey.fill(0);
   secret = kp;
   return describeKey(kp);
+}
+
+/**
+ * Zero a parsed key that will not be held (failed import, abandoned lookup).
+ * No-op when `kp` is the currently held secret — that one is owned by
+ * `forgetSecret` / `importParsedSecret`.
+ */
+export function discardParsedKey(kp: AntelopeKeyPair | null | undefined): void {
+  if (!kp || secret === kp) return;
+  kp.privateKey.fill(0);
 }
 
 /** Sign a 32-byte digest, returning a SIG_K1_… signature string. */

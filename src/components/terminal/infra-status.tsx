@@ -152,7 +152,10 @@ function EndpointConfigEditor() {
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
         One URL per line. Empty = curated defaults. Applies instantly — the provider
-        pools hot-reload and re-health-check.
+        pools hot-reload and re-health-check. Custom nodes are trusted like a new
+        RPC provider: they can lie on reads and they see signed transactions on
+        broadcast. Prefer <span className="font-mono">https://</span>. A wrong
+        chain id is rejected; private keys are never sent.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">

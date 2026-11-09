@@ -105,15 +105,18 @@ previews, and rollback: [DEPLOYMENT](./docs/DEPLOYMENT.md).
 - Prefer a **dedicated trading permission** with limited funds over your
   main account's owner key. Never import an owner key.
 
-Full details in [SECURITY](./docs/SECURITY.md).
+Full details in [SECURITY](./docs/SECURITY.md). Vulnerability reports:
+[SECURITY.md](./SECURITY.md) (private GitHub advisory, not a public issue).
 
 ## Honest limitations
 
-- **AI integration: analyst only.** An optional LLM desk (via your own
-  Cloudflare gateway — see [AI](./docs/AI.md)) can comment on the market, the
-  strategy config and the evidence journal. It is never on the trade path:
-  no signing, no gate input, and the gateway forces
-  `trade_authorization: false`. All trading decisions remain deterministic.
+- **AI integration.** The analyst desk (via your own Cloudflare gateway —
+  see [AI](./docs/AI.md)) comments on the market, strategy config and
+  evidence journal. It cannot sign. An optional **Jev CONTROL** mode
+  (default OFF, explicit confirm) can submit trade *candidates* through the
+  same risk/policy gauntlet as the deterministic bot. CONTROL cannot
+  suppress protective exits or bypass the firewall. Once granted, CONTROL
+  currently persists across reloads.
 - **Backtester: PLANNED.** Strategy calibration currently learns from live /
   paper results only (predicted-vs-realized edge memory).
 - Paper fills use the same route math but do not simulate partial fills,

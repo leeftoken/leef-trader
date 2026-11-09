@@ -2,6 +2,21 @@
 
 All notable changes to LEEF Trader. Dates are commit-era, not release tags.
 
+## Unreleased — 2026-11-09 security audit (no trading-logic changes)
+
+Re-audit of the public app. Findings in `AUDIT-2026-11-09.md`. Safe
+hardening only — no strategy, fee, slippage, or routing behavior changes.
+
+- **fix(wallet):** parse a session key once on import; zero the parsed bytes
+  on failed lookup or dialog close (`importParsedSecret` / `discardParsedKey`).
+- **fix(xss):** https-only `sanitizeUrl()` for Nostr avatar `src`; hide
+  ErrorBoundary stacks in production.
+- **docs:** root `SECURITY.md` disclosure policy; stale AI / "no server"
+  claims in README + `docs/SECURITY.md` + `docs/AI.md`.
+- **chore:** restore full-repo ESLint in CI (the old 31 unused-var errors
+  are gone); pin MCP packages; bump `vite` 8.3.0→8.3.7, `zod` 4.6.5→4.6.7
+  (advisory patches). CONTROL confirm dialog now discloses Jev state sharing.
+
 ## Unreleased — Branch sweep: restore code dropped by the squash merges
 
 Audit of all six remote branches (`consolidated/working-trader`,

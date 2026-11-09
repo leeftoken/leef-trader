@@ -8,6 +8,7 @@ import {
 } from "@/lib/market/stables";
 import type { PriceSource } from "@/lib/market/price-oracle";
 import { registryToken } from "./token-registry";
+import { isBrokenPool, reserveTvlUsd } from "./tvl-estimate";
 
 /**
  * The tradable token universe on Alcor/WAX, built from the full pool list.
@@ -118,7 +119,8 @@ function priceWithStableOracle(
 /**
  * Rank every token by its deepest WAX (or stable) pool and price it.
  * Dust books (< $5 TVL valuation pool) are excluded — they misprice and
- * can't be routed meaningfully anyway.
+ * can't be routed meaningfully anyway. When Alcor reports no TVL, it is
+ * estimated as 2 × the WAX/stable side (see tvl-estimate.ts).
  */
 export function buildUniverse(rawPools: unknown, waxUsd: number): UniverseToken[] {
   const list = Array.isArray(rawPools) ? (rawPools as RawPoolRow[]) : [];
@@ -189,9 +191,12 @@ export function buildUniverse(rawPools: unknown, waxUsd: number): UniverseToken[
     const a = p.tokenA;
     const b = p.tokenB;
     const id = Number(p.id);
-    const tvlUsd = num(p.tvlUSD);
     const volume24Usd = num(p.volumeUSD);
     if (!a || !b || !Number.isFinite(id)) continue;
+    if (isBrokenPool(id)) continue;
+    // Alcor's tvlUSD is 0 for pools it can't price (all SAT pairs); estimate
+    // from the WAX / trusted-stable side instead of dropping them as dust.
+    const tvlUsd = reserveTvlUsd(num(p.tvlUSD), a, b, waxUsd).usd;
     const aWax = isWaxToken(a);
     const bWax = isWaxToken(b);
     if (aWax || bWax) {

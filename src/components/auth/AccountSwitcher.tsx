@@ -11,6 +11,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.tsx';
 import { Skeleton } from '@/components/ui/skeleton.tsx';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
+import { sanitizeUrl } from '@/lib/sanitizeUrl';
 
 interface AccountSwitcherProps {
   onAddAccountClick: () => void;
@@ -35,7 +36,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
         <button className='flex items-center gap-2 h-10 p-1 pr-2.5 rounded-full hover:bg-accent transition-all text-foreground'>
           <Avatar className='w-8 h-8'>
             <AvatarImage
-              src={currentUser.metadata.picture}
+              src={sanitizeUrl(currentUser.metadata.picture)}
               alt={isCurrentUserPending ? '' : getDisplayName(currentUser)}
             />
             <AvatarFallback>
@@ -54,7 +55,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
           <Link to={`/${nip19.npubEncode(currentUser.pubkey)}`}>
             <Avatar className='w-8 h-8'>
               <AvatarImage
-                src={currentUser.metadata.picture}
+                src={sanitizeUrl(currentUser.metadata.picture)}
                 alt={isCurrentUserPending ? '' : getDisplayName(currentUser)}
               />
               <AvatarFallback>
@@ -84,7 +85,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
             >
               <Avatar className='w-8 h-8'>
                 <AvatarImage
-                  src={user.metadata.picture}
+                  src={sanitizeUrl(user.metadata.picture)}
                   alt={isPending ? '' : getDisplayName(user)}
                 />
                 <AvatarFallback>

@@ -8,12 +8,6 @@ import { setLearningModeProvider } from "@/lib/leef/learning-store";
 export const MIN_SYNC_SEC = 10;
 export const MAX_SYNC_SEC = 60;
 export const DEFAULT_SYNC_SEC = 30;
-export const SYNC_PRESETS = [
-  { sec: 10, label: "Live" },
-  { sec: 15, label: "15s" },
-  { sec: 30, label: "30s" },
-  { sec: 60, label: "60s" },
-] as const;
 
 export function clampSyncSec(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_SYNC_SEC;

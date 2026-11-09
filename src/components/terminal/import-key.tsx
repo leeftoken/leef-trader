@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { KeyRound, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +9,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { accountsForKeys, choosePermission, permissionsForKey } from "@/lib/wallet/chain";
-import { describeKey, importSecret, parsePrivateKey } from "@/lib/wallet/secret";
+import {
+  describeKey,
+  discardParsedKey,
+  importParsedSecret,
+  parsePrivateKey,
+} from "@/lib/wallet/secret";
 import { loginWallet, type WalletKind } from "@/lib/wallet/session";
 import { isAccountName } from "@/lib/wallet/tokens";
 import { useWallet } from "@/store/wallet";
@@ -26,6 +31,8 @@ export function ImportKeyDialog() {
   const [busy, setBusy] = useState<WalletKind | "key" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
+  const cancelled = useRef(false);
+  const pendingKey = useRef<ReturnType<typeof parsePrivateKey> | null>(null);
 
   async function onWallet(kind: WalletKind) {
     setError(null);
@@ -48,11 +55,26 @@ export function ImportKeyDialog() {
     }
   }
 
+  function closeDialog() {
+    cancelled.current = true;
+    discardParsedKey(pendingKey.current);
+    pendingKey.current = null;
+    setWif("");
+    setError(null);
+    setShowKey(false);
+    setOpen(false);
+  }
+
   async function onImport() {
     setError(null);
     setBusy("key");
+    cancelled.current = false;
+    let parsed: ReturnType<typeof parsePrivateKey> | null = null;
     try {
-      const parsed = parsePrivateKey(wif);
+      // Parse once. The same object is either held (success) or zeroed
+      // (failure / dialog close) — never left as a second heap copy.
+      parsed = parsePrivateKey(wif);
+      pendingKey.current = parsed;
       const pub = describeKey(parsed);
       let name = account.trim().toLowerCase();
       const found = await accountsForKeys([pub.publicKey, pub.legacy]);
@@ -76,10 +98,19 @@ export function ImportKeyDialog() {
       );
       if (!choice.ok) throw new Error(choice.reason);
       const permission = choice.permission;
-      importSecret(wif);
+      if (cancelled.current) {
+        discardParsedKey(parsed);
+        pendingKey.current = null;
+        parsed = null;
+        return;
+      }
+      importParsedSecret(parsed);
+      pendingKey.current = null;
+      parsed = null;
       setWif("");
       setLive({ account: name, publicKey: pub.publicKey, permission });
       setOpen(false);
+      setShowKey(false);
       const linkedNote =
         permission !== "active" && choice.linked.length > 0
           ? `Linked actions: ${choice.linked
@@ -92,7 +123,10 @@ export function ImportKeyDialog() {
         variant: choice.warning ? "destructive" : undefined,
       });
     } catch (err) {
-      // Never leave a pasted key sitting in the input after a failed import.
+      // Never leave a pasted key sitting in the input — or as an unheld
+      // parsed keypair — after a failed import.
+      discardParsedKey(parsed);
+      pendingKey.current = null;
       setWif("");
       setError(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -101,7 +135,13 @@ export function ImportKeyDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setOpen(true);
+        else closeDialog();
+      }}
+    >
       <DialogContent className="max-w-lg">
         <DialogTitle>Connect a WAX wallet</DialogTitle>
         <DialogDescription>

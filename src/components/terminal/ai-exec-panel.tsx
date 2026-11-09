@@ -348,6 +348,13 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
                   governor, CPU/NET/RAM preflight, policy firewall and pre-sign simulation.
                   Below the confidence threshold the proposal is logged and ignored.
                 </p>
+                <p>
+                  CONTROL sends a compact market summary to TypeSafe Jev via this
+                  app&apos;s <span className="font-mono">/api/jev</span> proxy:
+                  wallet balances, open position size/USD, strategy, and top pool
+                  stats. No keys, memos, or signed transactions are included. The
+                  same payload is sent in SUGGEST; OFF makes zero Jev calls.
+                </p>
                 <p className="text-warn">
                   You can switch back to SUGGEST or OFF at any time — OFF stops all Jev
                   calls immediately.

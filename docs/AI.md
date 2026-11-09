@@ -101,3 +101,25 @@ The swap desk shows a caution (≥ 0.5) or warning (≥ 0.7) notice for the pair
 - Advisory only: the notice never disables, sizes or alters a trade; it is not imported by the trade
   path (enforced in `ai-boundary.test.ts`). Unconfigured/down/timeout → `{ available: false }` → no notice.
 - Known tokens (WAX, LEEF, wrapped stables, TLM, …) are never sent or flagged.
+
+## Jev execution seam (CONTROL)
+
+Separate from the analyst gateway: `POST /api/jev` asks TypeSafe Jev for
+typed judgments that `ai-executor.ts` turns into a proposal. Default is
+**OFF** (zero Jev calls).
+
+- **SUGGEST** — proposals surface on the AI desk only.
+- **CONTROL** — a fresh proposal at/above confidence 0.75 becomes an
+  execution *candidate* and still runs the unchanged gauntlet (USD bounds,
+  learned ceiling, exact-quote gate, governor, resource preflight, policy
+  firewall, sign/reconcile). Enabling CONTROL requires an explicit confirm
+  dialog. The store refuses `setAiControl("control")` without `confirmed`.
+- The CONTROL confirm dialog discloses that balances, open position
+  size/USD, strategy, and top pool stats go to TypeSafe. No keys.
+- Jev cannot suppress a protective engine exit. Fail-closed: any non-OK
+  `/api/jev` response is treated as unavailable.
+
+CONTROL is persisted in `leef-terminal-sync` (session-only persistence is a
+tracked follow-up). `/api/jev` is rate-limited per IP per warm instance;
+set `TRADER_API_TOKEN` to require a bearer (the public web app currently
+calls it without one).

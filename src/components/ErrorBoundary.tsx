@@ -76,7 +76,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 Something went wrong
               </h2>
               <p className="text-muted-foreground">
-                An unexpected error occurred. The error has been reported.
+                An unexpected error occurred. An in-tab session key stays in
+                this tab&apos;s memory; reloading forgets it.
               </p>
             </div>
 
@@ -92,7 +93,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                       {this.state.error?.message}
                     </p>
                   </div>
-                  {this.state.error?.stack && (
+                  {import.meta.env.DEV && this.state.error?.stack && (
                     <div>
                       <strong className="text-foreground">Stack trace:</strong>
                       <pre className="text-xs text-muted-foreground mt-1 overflow-auto max-h-32">

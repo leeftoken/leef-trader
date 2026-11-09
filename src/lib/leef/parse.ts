@@ -1,3 +1,4 @@
+import { isBrokenPool, reserveTvlUsd, wantsTvlEstimate } from "./tvl-estimate";
 import { feeToPct, isLeefToken, isWaxToken, q64Price } from "./amm";
 import type { AuxPool, LeefPool, LiveTrade, TokenRef } from "./types";
 import { isTrustedStable } from "@/lib/market/stables";
@@ -42,6 +43,7 @@ export function parseAllPools(raw: unknown): { leef: LeefPool[]; aux: AuxPool[] 
     if (!a || !b) continue;
     const id = Number(p.id);
     if (!Number.isFinite(id)) continue;
+    if (isBrokenPool(id)) continue; // broken / near-empty pools are never priced or routed
     const fee = num(p.fee) || 3000;
     const tvlUsd = num(p.tvlUSD ?? p.tvlUsd);
     const volume24Usd = num(
@@ -380,8 +382,19 @@ export function attachUsdPrices(
       if (isWaxToken(p.pair)) p.tvlUsd = p.pair.quantity * 2 * waxUsd;
       else if (isTrustedStable(p.pair.symbol.toUpperCase(), p.pair.contract)) {
         p.tvlUsd = p.pair.quantity * 2;
+      } else if (leefUsd > 0 && p.leef.quantity > 0 && wantsTvlEstimate(p.leef, p.pair)) {
+        // Pair Alcor can't price (e.g. SAT): 2 × the LEEF side, LEEF priced
+        // from the main WAX pool — never from this pool's own quote.
+        p.tvlUsd = p.leef.quantity * 2 * leefUsd;
       }
     }
+  }
+  // Aux SAT books Alcor reports at $0 TVL (SAT/WAX, SAT/stable): estimate
+  // from the trusted side so they aren't dropped as dust. Other tokens keep
+  // Alcor's figure (see ESTIMATE_TVL_TOKENS).
+  for (const p of aux) {
+    if (p.tvlUsd > 0) continue;
+    p.tvlUsd = reserveTvlUsd(0, p.tokenA, p.tokenB, waxUsd, leefUsd).usd;
   }
 
   return { waxUsd, leefUsd, waxPerLeef, waxConfidence, waxSources, waxDispersionPct };

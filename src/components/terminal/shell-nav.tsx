@@ -36,7 +36,7 @@ export function MobileNav({ poolCount }: { poolCount: number }) {
   const tab = useTerminal((s) => s.tab);
   const setTab = useTerminal((s) => s.setTab);
   const [open, setOpen] = useState(false);
-  const primary: TabId[] = ["tick", "bot", "quotes", "wallet"];
+  const primary: TabId[] = ["overview", "tick", "bot", "wallet"];
   const more = TABS.filter((t) => !primary.includes(t.id));
 
   return (
@@ -55,9 +55,10 @@ export function MobileNav({ poolCount }: { poolCount: number }) {
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition-colors",
-                  active ? "text-leef" : "text-muted-foreground",
+                  "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-leef/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
+                  active ? "bg-leef/[0.06] text-leef" : "text-muted-foreground hover:bg-surface-2/70 hover:text-fg",
                 )}
               >
                 <span
@@ -143,6 +144,7 @@ function NavChip({
     <button
       type="button"
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex h-12 shrink-0 items-center gap-2 whitespace-nowrap px-3.5 text-[13px] font-medium transition-colors",
         active ? "text-fg" : "text-muted-foreground hover:text-fg",

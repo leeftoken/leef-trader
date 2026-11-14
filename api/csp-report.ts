@@ -12,7 +12,7 @@
  * follow-up. Rate-limited per IP; no auth (browsers cannot send credentials
  * with violation reports).
  */
-import { guard } from "./_guard";
+import { guard } from "./_guard.js";
 
 const MAX_LOG_CHARS = 2048;
 

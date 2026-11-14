@@ -10,7 +10,7 @@
  * leaves this function (not returned, not logged). Request bodies and answers
  * are never logged either — market state can be position-sensitive.
  */
-import { guard } from "./_guard";
+import { guard } from "./_guard.js";
 
 declare const process: { env: Record<string, string | undefined> };
 

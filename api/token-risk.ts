@@ -16,8 +16,8 @@ import {
   parseTokenRiskRequest,
   tokenId,
   type TokenRisk,
-} from "../src/lib/leef/token-risk-core";
-import { guard } from "./_guard";
+} from "../src/lib/leef/token-risk-core.js";
+import { guard } from "./_guard.js";
 
 declare const process: { env: Record<string, string | undefined> };
 

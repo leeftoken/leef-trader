@@ -255,6 +255,21 @@ export function aiSummaryOf(
         : candidateKind === "preview"
           ? ["hold", "buy"]
           : ["hold"];
+  const uniqueContract = (symbol: string): string | undefined => {
+    const matches = tokenUniverse.filter((t) => t.symbol === symbol);
+    return matches.length === 1 ? matches[0]!.contract : undefined;
+  };
+  const resolvedCandidateDetails =
+    candidateKind === "preview"
+      ? {
+          tokenIn: quote,
+          tokenInContract: uniqueContract(quote),
+          tokenOut: base,
+          tokenOutContract: uniqueContract(base),
+          amountIn: balances[quote] ?? 0,
+          ...candidateDetails,
+        }
+      : candidateDetails;
 
   const position = b.position;
   const positionEntryUsd = position?.entryUsd ?? 0;
@@ -317,7 +332,7 @@ export function aiSummaryOf(
     tokenUniverse,
     candidateKind,
     candidateKey,
-    candidate: { kind: candidateKind, key: candidateKey, ...candidateDetails },
+    candidate: { kind: candidateKind, key: candidateKey, ...resolvedCandidateDetails },
     allowedActions,
 
   };

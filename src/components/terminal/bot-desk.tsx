@@ -100,6 +100,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
   const closedTrades = Math.max(0, Number(b.stats.closedTrades) || 0);
   const winRate = closedTrades > 0 ? b.stats.wins / closedTrades : null;
+  const liveClosedTrades = Math.max(0, Number(b.stats.liveClosedTrades) || 0);
+  const liveWinRate = liveClosedTrades > 0 ? (Number(b.stats.liveWins) || 0) / liveClosedTrades : null;
+  const liveRealizedUsd = Number(b.stats.liveRealizedUsd) || 0;
+  const paperClosedTrades = Math.max(0, Number(b.stats.paperClosedTrades) || 0);
+  const paperRealizedUsd = Number(b.stats.paperRealizedUsd) || 0;
 
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
   /**
@@ -478,18 +483,21 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               )}
             </Card>
             <Card className="p-4">
-              <div className="text-xs uppercase tracking-wider text-subtle">Session P&L</div>
+              <div className="text-xs uppercase tracking-wider text-subtle">Live realized P&L</div>
               <div
                 className={cn(
                   "mt-1 font-mono text-lg tabular-nums",
-                  b.stats.realizedUsd >= 0 ? "text-buy" : "text-sell",
+                  liveRealizedUsd >= 0 ? "text-buy" : "text-sell",
                 )}
               >
-                {b.stats.realizedUsd >= 0 ? "+" : ""}
-                {fmtUsd(b.stats.realizedUsd, 2)}
+                {liveRealizedUsd >= 0 ? "+" : ""}
+                {fmtUsd(liveRealizedUsd, 2)}
               </div>
               <div className="text-xs text-muted-foreground">
-                {winRate == null ? "No closed outcomes yet" : `win rate ${(winRate * 100).toFixed(0)}%`} · {closedTrades} closed
+                {liveWinRate == null ? "No settled live outcomes yet" : `win rate ${(liveWinRate * 100).toFixed(0)}%`} · {liveClosedTrades} closed
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Paper: {paperRealizedUsd >= 0 ? "+" : ""}{fmtUsd(paperRealizedUsd, 2)} · {paperClosedTrades} closed
               </div>
             </Card>
             <Card className="p-4">

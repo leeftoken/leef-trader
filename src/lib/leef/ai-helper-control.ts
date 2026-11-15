@@ -145,7 +145,7 @@ export function parseAiHelperReview(
 export type AiHelperGate = { allowed: true; reason: string } | { allowed: false; reason: string };
 
 /**
- * The helper is a independent supervisory veto for risk-increasing actions.
+ * The helper is an independent supervisory veto for risk-increasing actions.
  * It cannot veto an exit, and it can never bypass the normal deterministic
  * trading gauntlet. Missing/invalid/stale reviews fail closed for entries.
  */

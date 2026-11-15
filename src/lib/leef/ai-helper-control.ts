@@ -204,7 +204,12 @@ export function helperReviewOfResult(
   proposal: AiProposal,
   reviewedAt: number = Date.now(),
 ): AiHelperReview | null {
-  return parseAiHelperReview(result.content, proposal, {
+  return parseAiHelperReview(result.content, {
+    proposalId: proposal.proposalId,
+    action: proposal.action,
+    snapshotFetchedAt: proposal.snapshotFetchedAt,
+    proposedAt: proposal.fetchedAt,
+  }, {
     reviewedAt,
     model: result.model,
   });

@@ -126,8 +126,14 @@ async function buildTransfers(opts: {
   /** Route price-impact allowance for the cross-check's lower band, percent. Default 5. */
   maxImpactPct?: number;
 }): Promise<{ transfers: TransferSpec[]; expectedOut: number; guaranteedOut: number }> {
-  const tokenIn = metaOf(opts.route.tokenIn, opts.snap);
-  const tokenOut = metaOf(opts.route.tokenOut, opts.snap);
+  const tokenIn = metaOf(
+    opts.route.tokenInContract ? `${opts.route.tokenIn}@${opts.route.tokenInContract}` : opts.route.tokenIn,
+    opts.snap,
+  );
+  const tokenOut = metaOf(
+    opts.route.tokenOutContract ? `${opts.route.tokenOut}@${opts.route.tokenOutContract}` : opts.route.tokenOut,
+    opts.snap,
+  );
 
   const isCycle =
     opts.route.tokenIn.toUpperCase() === opts.route.tokenOut.toUpperCase();

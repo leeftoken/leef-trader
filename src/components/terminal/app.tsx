@@ -15,6 +15,10 @@ import { useSnapshot } from "./use-snapshot";
 const AiDesk = lazy(() =>
   import("./ai-desk").then((m) => ({ default: m.AiDesk })),
 );
+// Always-mounted UI supervisor; it owns helper API calls independently of the selected desk.
+const AiHelperSupervisor = lazy(() =>
+  import("./ai-helper-supervisor").then((m) => ({ default: m.AiHelperSupervisor })),
+);
 const BotDesk = lazy(() =>
   import("./bot-desk").then((m) => ({ default: m.BotDesk })),
 );
@@ -92,6 +96,9 @@ export function TerminalApp() {
       />
       <StatusBar snap={snap} ranked={ranked} tick={tick} />
       <ImportKeyDialog />
+      <Suspense fallback={null}>
+        <AiHelperSupervisor />
+      </Suspense>
 
       {snap.warning && (snap.source === "fallback" || snap.source === "unavailable") && (
         <div className="mx-auto w-full max-w-[1440px] px-4 pt-4 sm:px-6">

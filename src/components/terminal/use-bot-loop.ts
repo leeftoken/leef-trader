@@ -1651,8 +1651,12 @@ async function runBotOnceInner(
             const quoteMeta = metaOf(quoteTok, book);
             const actual = assetDelta(rec.transfers, w.account, baseMeta.symbol, baseMeta.contract);
             const spent = assetDelta(rec.transfers, w.account, quoteMeta.symbol, quoteMeta.contract);
-            if (actual > 0 && spent < 0) {
+            const exactInputDebit =
+              spent < 0 &&
+              Math.abs(-spent - decision.amountIn) <= 1 / 10 ** quoteMeta.decimals + 1e-12;
+            if (actual > 0 && exactInputDebit) {
               amountLeef = actual;
+              quoteSpent = -spent;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
               markConfirmed();
@@ -1689,7 +1693,7 @@ async function runBotOnceInner(
           txid, status: "unknown",
           predEdgePct: decision.edge?.netEdgePct,
           latencyMs: Date.now() - tExec,
-          ...routeJournalMeta(decision.route, decision.amountIn, bounds.quoteUsd),
+          ...routeJournalMeta(decision.route, quoteSpent, bounds.quoteUsd),
           ...ctxOf(), leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
         });
         return decision;
@@ -1705,10 +1709,10 @@ async function runBotOnceInner(
         ? {
             amountLeef: prev.amountLeef + amountLeef,
             entryUsd:
-              (prev.entryCostUsd + decision.amountIn * quoteUsdPx) /
+              (prev.entryCostUsd + quoteSpent * quoteUsdPx) /
               Math.max(prev.amountLeef + amountLeef, 1e-9),
-            entryCostUsd: prev.entryCostUsd + decision.amountIn * quoteUsdPx,
-            entryWax: prev.entryWax + decision.amountIn,
+            entryCostUsd: prev.entryCostUsd + quoteSpent * quoteUsdPx,
+            entryWax: prev.entryWax + quoteSpent,
             since: prev.since,
             highUsd: Math.max(prev.highUsd, baseUsdPx),
             mode,
@@ -1716,16 +1720,16 @@ async function runBotOnceInner(
             predEdgePct:
               decision.edge != null
                 ? ((prev.predEdgePct ?? decision.edge.netEdgePct) * prev.entryWax +
-                    decision.edge.netEdgePct * decision.amountIn) /
-                  Math.max(prev.entryWax + decision.amountIn, 1e-9)
+                    decision.edge.netEdgePct * quoteSpent) /
+                  Math.max(prev.entryWax + quoteSpent, 1e-9)
                 : prev.predEdgePct,
             strategy: prev.strategy ?? b.strategy,
           }
         : {
             amountLeef,
             entryUsd: baseUsdPx,
-            entryCostUsd: decision.amountIn * quoteUsdPx,
-            entryWax: decision.amountIn,
+            entryCostUsd: quoteSpent * quoteUsdPx,
+            entryWax: quoteSpent,
             since: Date.now(),
             highUsd: baseUsdPx,
             mode,
@@ -1746,7 +1750,7 @@ async function runBotOnceInner(
       journal({
         kind: "execution", action: "buy", strategy: b.strategy, mode,
         tokenIn: quoteTok, tokenOut: baseTok,
-        amountIn: decision.amountIn, expectedOut: decision.route.amountOut,
+        amountIn: quoteSpent, expectedOut: decision.route.amountOut,
         actualOut: amountLeef, txid, status: execStatus,
         predEdgePct: decision.edge?.netEdgePct,
         latencyMs: live ? Date.now() - tExec : undefined,
@@ -1763,7 +1767,7 @@ async function runBotOnceInner(
           book,
           decision.route.poolIds[0],
           "buy",
-          decision.amountIn * (bounds.quoteUsd),
+          quoteSpent * (bounds.quoteUsd),
           quoteTok,
           baseTok,
         );
@@ -1827,7 +1831,10 @@ async function runBotOnceInner(
             const baseMeta = metaOf(b.base || "LEEF", book);
             const actualIn = assetDelta(rec.transfers, w.account, baseMeta.symbol, baseMeta.contract);
             const actualOut = assetDelta(rec.transfers, w.account, sellQuoteMeta.symbol, sellQuoteMeta.contract);
-            if (actualIn < 0 && actualOut > 0) {
+            const fullPositionDebited =
+              actualIn < 0 &&
+              Math.abs(-actualIn - decision.amountLeef) <= 1 / 10 ** baseMeta.decimals + 1e-12;
+            if (fullPositionDebited && actualOut > 0) {
               quoteOut = actualOut;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
@@ -1852,7 +1859,7 @@ async function runBotOnceInner(
         w.applyPaperFill(b.base || "LEEF", decision.amountLeef, b.quote || "WAX", quoteOut);
       }
       if (live && execStatus !== "confirmed") {
-        const reason = `Sell broadcast ${txid ? txid.slice(0, 10) + "…" : ""} is not yet transfer-settled. The tracked position and realized P&L are unchanged.`;
+        const reason = `Sell broadcast ${txid ? txid.slice(0, 10) + "…" : ""} is not yet fully settled for the entire tracked position. The position and realized P&L remain unchanged.`;
         b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, b.stats.lastPnlUsd));
         b.clearRejectionStreak();
         b.setLastReason(reason);

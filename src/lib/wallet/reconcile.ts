@@ -84,6 +84,27 @@ export function parseHyperionTransfers(
  * Net balance delta for one token from the account's perspective:
  * incoming minus outgoing. Positive = received.
  */
+/**
+ * A positive output alone does not prove that the intended input amount was
+ * fully debited. Require an exact negative delta within one raw token unit.
+ */
+export function matchesExactDebit(
+  actualDelta: number,
+  expectedAmount: number,
+  decimals: number,
+): boolean {
+  if (
+    !Number.isFinite(actualDelta) ||
+    !Number.isFinite(expectedAmount) ||
+    expectedAmount <= 0 ||
+    !Number.isInteger(decimals) ||
+    decimals < 0 ||
+    decimals > 18
+  ) return false;
+  const oneRawUnit = 1 / 10 ** decimals;
+  return actualDelta < 0 && Math.abs(-actualDelta - expectedAmount) <= oneRawUnit + 1e-12;
+}
+
 export function assetDelta(
   transfers: TxTransfer[],
   account: string,

@@ -457,8 +457,10 @@ function TradeButton({ snap }: { snap: LeefSnapshot }) {
           <span>
             {done.mode === "live"
               ? done.confirmed
-                ? "Live fill · confirmed on-chain"
-                : "Live fill · confirmation pending — amount is the router quote"
+                ? "Live fill · exact token transfers confirmed on-chain"
+                : done.settlementIssue
+                  ? done.settlementIssue
+                  : "Live transaction · transfer confirmation pending — amount shown is only the router quote"
               : "Paper fill"}{" "}
             · {fmtNum(done.amountOut, { compact: true })} {tokenOut} on {done.routeLabel}
             {done.txid && (

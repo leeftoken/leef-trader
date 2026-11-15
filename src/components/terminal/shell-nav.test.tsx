@@ -13,6 +13,15 @@ describe("MobileNav primary navigation", () => {
     expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
   });
 
+  it("keeps the high-frequency trader desks in the bottom bar", () => {
+    render(<MobileNav poolCount={8} />);
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Swap" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Wallet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More" })).toBeInTheDocument();
+  });
+
   it("marks the current section as the active page", () => {
     useTerminal.setState({ tab: "bot" });
     render(<MobileNav poolCount={8} />);
@@ -23,6 +32,8 @@ describe("MobileNav primary navigation", () => {
     render(<MobileNav poolCount={8} />);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     expect(useTerminal.getState().tab).toBe("overview");
+    fireEvent.click(screen.getByRole("button", { name: "Swap" }));
+    expect(useTerminal.getState().tab).toBe("quotes");
     fireEvent.click(screen.getByRole("button", { name: "Bot" }));
     expect(useTerminal.getState().tab).toBe("bot");
   });

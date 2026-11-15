@@ -1,7 +1,8 @@
 /**
  * Audit §8/§14 — the AI execution boundary, enforced as an import-graph test.
  *
- * The analyst (lib/leef/ai-analyst.ts) is reachable from DESKS ONLY. The
+ * The analyst (lib/leef/ai-analyst.ts) is reachable from UI-layer desks and
+ * the always-mounted UI supervisor only. The
  * trade path — engine, gates, signer, policy firewall, reconcile — must never
  * import it, and the AI module itself must never import a signer. If a future
  * change wires AI into the trade path, this test fails at `npm test`, not in
@@ -102,6 +103,16 @@ describe("AI execution boundary", () => {
         expect(seam, `${f} must not import the Jev proposal modules`).toBe(false);
       }
     }
+  });
+
+
+  it("the always-mounted helper supervisor remains UI-only and cannot sign", () => {
+    const src = read("../../components/terminal/ai-helper-supervisor.tsx");
+    expect(src.includes("ai-analyst"), "the UI supervisor may consume the AI client").toBe(true);
+    expect(src.includes("lib/wallet"), "the supervisor must not import wallet code").toBe(false);
+    expect(src.includes("signAndPush"), "the supervisor must not sign").toBe(false);
+    expect(src.includes("push_transaction"), "the supervisor must not submit transactions").toBe(false);
+    expect(src.includes("wallet/secret"), "the supervisor must not access wallet secrets").toBe(false);
   });
 
   it("the evidence journal is a sink, not a signer", () => {

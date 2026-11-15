@@ -75,8 +75,6 @@ export const AI_RESPONSE_MAX_LATENCY_MS = 35_000;
 export const AI_QID = {
   action: "action",
   sizeBucket: "size_bucket",
-  swapTokenIn: "swap_token_in",
-  swapTokenOut: "swap_token_out",
   riskStress: "risk_stress",
   riskExecute: "risk_execute",
 } as const;
@@ -396,9 +394,9 @@ function noulOf(answers: JevAnswers, qid: string): number | null {
 
 /**
  * Typed answers → a proposal. confidence = the weakest relevant judgment.
- * When context is supplied (all live call sites), swap tokens are checked
- * against the exact question's closed sets and the source snapshot/model are
- * attached for the execution freshness gate.
+ * When context is supplied (all live call sites), action and candidate identity
+ * are checked against the exact engine-generated candidate; swap token details
+ * come from code-owned candidate data, never from model-selected strings.
  */
 export function parseAiProposal(
   answers: JevAnswers,

@@ -155,13 +155,15 @@ function helperDeterministicContext(
 function aiEngineCandidateOf(
   decision: Extract<Decision, { kind: "buy" }>,
   b: ReturnType<typeof useBot.getState>,
+  snapshotFetchedAt: string,
 ): AiEngineCandidate {
   const tokenIn = (b.quote || "WAX").toUpperCase();
   const tokenOut = (b.base || "LEEF").toUpperCase();
   const amountIn = Number(decision.amountIn.toPrecision(12));
   const routeSig = routeSignature(decision.route);
   return {
-    id: ["engine-buy", b.strategy, tokenIn, tokenOut, amountIn.toPrecision(12), routeSig].join(":"),
+    id: ["engine-buy", snapshotFetchedAt, b.strategy, tokenIn, tokenOut, amountIn.toPrecision(12), routeSig].join(":"),
+    snapshotFetchedAt,
     tokenIn,
     tokenOut,
     amountIn,
@@ -669,7 +671,7 @@ async function runBotOnceInner(
   // Only ask Jev to assess a deterministic engine BUY candidate. No polling
   // on HOLD/STOP/SELL/ARB/SWAP paths; the AI cannot create or replace them.
   if (!opts?.dry && decision.kind === "buy") {
-    maybeKickAiPoll(snap, b, balances, aiEngineCandidateOf(decision, b));
+    maybeKickAiPoll(snap, b, balances, aiEngineCandidateOf(decision, b, snap.fetchedAt));
   }
 
   b.setLastReason(decision.reason);
@@ -770,7 +772,7 @@ async function runBotOnceInner(
   // still pass — the AI can never suppress a risk exit.
   if (useTerminal.getState().aiControl === "control" && decision.kind === "buy") {
     const p = useTerminal.getState().aiProposal;
-    const engineCandidate = aiEngineCandidateOf(decision, b);
+    const engineCandidate = aiEngineCandidateOf(decision, b, snap.fetchedAt);
     const fresh: AiProposal | null =
       p && isAiProposalFresh(p, Date.now()) ? p : null;
     const aiHold = (reason: string): Decision => {

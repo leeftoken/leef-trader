@@ -28,6 +28,22 @@ describe("MobileNav primary navigation", () => {
     expect(screen.getByRole("button", { name: "Bot" })).toHaveAttribute("aria-current", "page");
   });
 
+
+  it("opens More and switches to an additional desk", () => {
+    render(<MobileNav poolCount={8} />);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const satDesk = screen.getByRole("button", { name: /SAT treasury/i });
+    expect(satDesk).toBeInTheDocument();
+    fireEvent.click(satDesk);
+    expect(useTerminal.getState().tab).toBe("sat");
+  });
+
+  it("marks More as current when an additional desk is active", () => {
+    useTerminal.setState({ tab: "sat" });
+    render(<MobileNav poolCount={8} />);
+    expect(screen.getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("opens the selected desk from the bottom navigation", () => {
     render(<MobileNav poolCount={8} />);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));

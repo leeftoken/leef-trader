@@ -33,8 +33,6 @@ export interface AiProposal {
 export interface AiProposalMetadata {
   snapshotFetchedAt: string;
   engineCandidateId?: string;
-  candidatesIn: readonly string[];
-  candidatesOut: readonly string[];
   model: string;
   receivedAt?: number;
 }

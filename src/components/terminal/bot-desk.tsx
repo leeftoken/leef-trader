@@ -98,8 +98,6 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const warmup = Math.min(b.series.length, BOT_WARMUP_POINTS);
 
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
-  const closedTrades = Math.max(0, Number(b.stats.closedTrades) || 0);
-  const winRate = closedTrades > 0 ? b.stats.wins / closedTrades : null;
   const liveClosedTrades = Math.max(0, Number(b.stats.liveClosedTrades) || 0);
   const liveWinRate = liveClosedTrades > 0 ? (Number(b.stats.liveWins) || 0) / liveClosedTrades : null;
   const liveRealizedUsd = Number(b.stats.liveRealizedUsd) || 0;
@@ -993,10 +991,14 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
   const rows = targetUnitPnl(snap, balances, targets, start);
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
   const startEq = useBot((s) => s.stats.startEquityUsd);
-  const trades = useBot((s) => s.stats.trades);
-  const wins = useBot((s) => s.stats.wins);
-  const closedTrades = Math.max(0, Number(useBot((s) => s.stats.closedTrades)) || 0);
-  const winRate = closedTrades > 0 ? wins / closedTrades : null;
+  const liveClosedTrades = Math.max(0, Number(useBot((s) => s.stats.liveClosedTrades)) || 0);
+  const liveWins = Math.max(0, Number(useBot((s) => s.stats.liveWins)) || 0);
+  const liveRealizedUsd = Number(useBot((s) => s.stats.liveRealizedUsd)) || 0;
+  const paperClosedTrades = Math.max(0, Number(useBot((s) => s.stats.paperClosedTrades)) || 0);
+  const paperWins = Math.max(0, Number(useBot((s) => s.stats.paperWins)) || 0);
+  const paperRealizedUsd = Number(useBot((s) => s.stats.paperRealizedUsd)) || 0;
+  const liveWinRate = liveClosedTrades > 0 ? liveWins / liveClosedTrades : null;
+  const paperWinRate = paperClosedTrades > 0 ? paperWins / paperClosedTrades : null;
   const valueDelta = equityUsd - startEq;
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1019,13 +1021,19 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
         </Card>
       ))}
       <Card className="p-4">
-        <div className="text-xs uppercase tracking-wider text-subtle">Portfolio value</div>
+        <div className="text-xs uppercase tracking-wider text-subtle">Wallet value change</div>
         <div className={cn("mt-1 font-mono text-lg tabular-nums", valueDelta >= 0 ? "text-buy" : "text-sell")}>
           {valueDelta >= 0 ? "+" : ""}
           {fmtUsd(valueDelta, 2)}
         </div>
         <div className="text-xs text-muted-foreground">
-          {fmtUsd(equityUsd, 2)} · {trades} executions · {winRate == null ? "win rate unavailable" : `${(winRate * 100).toFixed(0)}% of ${closedTrades} closed`}
+          {fmtUsd(equityUsd, 2)} current wallet value · marked change includes unrealized exposure
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Live: {liveRealizedUsd >= 0 ? "+" : ""}{fmtUsd(liveRealizedUsd, 2)} · {liveWinRate == null ? "no settled outcomes" : `${(liveWinRate * 100).toFixed(0)}% wins`} · {liveClosedTrades} closed
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Paper: {paperRealizedUsd >= 0 ? "+" : ""}{fmtUsd(paperRealizedUsd, 2)} · {paperWinRate == null ? "no settled outcomes" : `${(paperWinRate * 100).toFixed(0)}% wins`} · {paperClosedTrades} closed
         </div>
       </Card>
     </div>

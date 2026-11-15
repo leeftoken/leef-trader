@@ -218,6 +218,13 @@ export function aiSummaryOf(
       .map((p) => p.id),
   );
   const topAuxIds = new Set(snap.aux.slice(0, 10).map((p) => p.id));
+  const displayPoolIds = new Set(
+    [...snap.pools]
+      .sort((a, c) => c.tvlUsd - a.tvlUsd)
+      .slice(0, 5)
+      .map((p) => p.id),
+  );
+  candidatePoolIds.forEach((id) => displayPoolIds.add(id));
   const tokenMap = new Map<string, { symbol: string; contract: string }>();
   for (const p of snap.pools) {
     if (!candidatePoolIds.has(p.id) && !topPoolIds.has(p.id)) continue;
@@ -295,8 +302,8 @@ export function aiSummaryOf(
       maxQuoteAgeSec: b.risk?.maxQuoteAgeSec ?? 30,
     },
     topPools: [...snap.pools]
+      .filter((p) => displayPoolIds.has(p.id))
       .sort((a, c) => c.tvlUsd - a.tvlUsd)
-      .slice(0, 5)
       .map((p) => ({
         id: p.id,
         pair: "LEEF/" + p.pair.symbol,

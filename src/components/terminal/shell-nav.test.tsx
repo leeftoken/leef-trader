@@ -1,7 +1,37 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { MobileNav } from "./shell-nav";
+import { DesktopNav, MobileNav } from "./shell-nav";
 import { useTerminal } from "@/store/terminal";
+
+
+describe("DesktopNav information architecture", () => {
+  beforeEach(() => {
+    useTerminal.setState({ tab: "overview" });
+  });
+
+  it("keeps the seven high-frequency desks in the main desktop navigation", () => {
+    render(<DesktopNav poolCount={8} />);
+    for (const label of ["Overview", "Live tick", "Swap", "Pools", "Portfolio", "AI Bot", "Wallet", "Tools"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: "SAT treasury" })).not.toBeInTheDocument();
+  });
+
+  it("opens the Tools drawer and navigates to a specialist desk", () => {
+    render(<DesktopNav poolCount={8} />);
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    const treasury = screen.getByRole("button", { name: /SAT treasury/i });
+    expect(treasury).toBeInTheDocument();
+    fireEvent.click(treasury);
+    expect(useTerminal.getState().tab).toBe("sat");
+  });
+
+  it("marks Tools as the current page when a specialist desk is active", () => {
+    useTerminal.setState({ tab: "sat" });
+    render(<DesktopNav poolCount={8} />);
+    expect(screen.getByRole("button", { name: "Tools" })).toHaveAttribute("aria-current", "page");
+  });
+});
 
 describe("MobileNav primary navigation", () => {
   beforeEach(() => {

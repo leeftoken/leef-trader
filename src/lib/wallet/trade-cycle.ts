@@ -191,7 +191,7 @@ export function unknownBlockReason(): string | null {
     return "A prior signing attempt was interrupted by reload — inspect wallet activity before submitting another trade";
   }
   if (lock.phase !== "unknown" || !lock.txid) return null;
-  return `Previous tx ${lock.txid.slice(0, 10)}… is unresolved — not submitting another trade until settlement is reconciled`;
+  return `Previous tx ${lock.txid.slice(0, 10)}… is UNKNOWN / unresolved — not submitting another trade until settlement is reconciled`;
 }
 
 /** Refresh the in-memory guard from browser storage (also useful after app mount). */

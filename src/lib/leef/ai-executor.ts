@@ -15,6 +15,8 @@ export type AiAction = "hold" | "buy" | "sell" | "swap" | "rebalance" | "reduce_
 
 export interface AiProposal {
   action: AiAction;
+  /** Identity of the deterministic engine opportunity Jev reviewed. */
+  engineCandidateId: string;
   params: Record<string, string>;
   confidence: number;
   /** qid of the weakest judgment that produced `confidence`. */
@@ -30,6 +32,7 @@ export interface AiProposal {
 
 export interface AiProposalMetadata {
   snapshotFetchedAt: string;
+  engineCandidateId?: string;
   candidatesIn: readonly string[];
   candidatesOut: readonly string[];
   model: string;
@@ -54,7 +57,7 @@ export const AI_QID = {
   riskExecute: "risk_execute",
 } as const;
 
-const AI_ACTIONS: AiAction[] = ["hold", "buy", "sell", "reduce_risk"];
+const AI_ACTIONS: AiAction[] = ["hold", "buy"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
@@ -78,9 +81,17 @@ export interface AiSnapshotSummary {
     volume24Usd: number;
     change24: number;
   }[];
-  /** Closed sets for the swap per-arg questions. */
-  candidatesIn: string[];
-  candidatesOut: string[];
+  /** Present only when the deterministic engine has a viable BUY opportunity. */
+  engineCandidate?: {
+    id: string;
+    tokenIn: string;
+    tokenOut: string;
+    amountIn: number;
+    routeSignature: string;
+    netEdgePct: number | null;
+    priceImpactPct: number;
+    reason: string;
+  };
 }
 
 /** Structural bot slice for summary building — avoids a store import here. */
@@ -102,9 +113,6 @@ export function aiSummaryOf(
 ): AiSnapshotSummary {
   const quote = (b.quote || "WAX").toUpperCase();
   const base = (b.base || "LEEF").toUpperCase();
-  const held = Object.entries(balances)
-    .filter(([, n]) => n > 0)
-    .map(([s]) => s.toUpperCase());
   return {
     waxUsd: snap.waxUsd,
     leefUsd: snap.leefUsd,
@@ -126,8 +134,7 @@ export function aiSummaryOf(
       volume24Usd: p.volume24Usd,
       change24: p.change24,
     })),
-    candidatesIn: held.length > 0 ? held : [quote],
-    candidatesOut: [...new Set([base, quote, "WAX", "WAXUSDC", "USDT"])],
+
   };
 }
 
@@ -140,18 +147,19 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
   const questions: Record<string, JevQuestion> = {
     [AI_QID.action]: {
       type: "choice",
-      instructions:
-        "You are the trading controller for a small WAX-chain market-maker. Given `state`, which single action should the engine take THIS cycle? Choose 'hold' unless a different action is clearly justified by the state.",
+      instructions: summary.engineCandidate
+        ? "You are an independent entry reviewer. The deterministic trading engine has already produced state.engineCandidate and passed its earlier eligibility checks. Decide only whether to execute THIS EXACT candidate or hold. Never invent another trade, token, route, amount, or risk limit. Choose hold whenever the evidence is uncertain, contradictory, stale, or unattractive after costs."
+        : "This is an advisory dry-run without a deterministic live candidate. Assess only the configured base/quote pair and choose hold unless a hypothetical entry is clearly justified. This response is not eligible for automatic execution.",
       criteria: {
-        hold: "Do nothing this cycle.",
-        buy: `Enter/add a ${summary.base} position spending ${summary.quote}.`,
-        sell: `Exit the full tracked ${summary.base} position into ${summary.quote}; partial exits are not supported.`,
-        reduce_risk: "Cut exposure by exiting the full tracked position; partial exits are not supported.",
+        hold: "Do not execute; keep the deterministic candidate on hold.",
+        buy: summary.engineCandidate
+          ? `Execute the exact engine-generated candidate ${summary.engineCandidate.tokenIn}→${summary.engineCandidate.tokenOut}, amount ${summary.engineCandidate.amountIn}; do not alter it.`
+          : `Hypothetically consider entering ${summary.base} using ${summary.quote}; advisory only.`,
       },
     },
     [AI_QID.sizeBucket]: {
       type: "choice",
-      instructions: "IF a buy action were selected, what fraction of the deployable quote balance should be used? This answer does not size exits.",
+      instructions: "IF the exact engine-generated BUY candidate were approved, what fraction of its existing proposed amount should remain? Choose a fraction only to reduce the candidate size, never increase it.",
       criteria: {
         quarter: "25% — cautious clip.",
         half: "50% — moderate.",
@@ -206,9 +214,8 @@ function noulOf(answers: JevAnswers, qid: string): number | null {
 /**
  * Typed answers → a proposal. confidence = the WEAKEST relevant judgment
  * (action choice, its arguments, the risk nouls). Returns null when the
- * answers are unusable: missing/malformed judgments, incoherent swap args,
- * or the risk nouls contradict the action (unsafe-to-act data, or acute
- * stress against an entry).
+ * answers are unusable: unsupported actions, missing/malformed judgments,
+ * or the risk nouls contradict the entry (unsafe-to-act data or acute stress).
  */
 export function parseAiProposal(
   answers: JevAnswers,
@@ -236,35 +243,15 @@ export function parseAiProposal(
     // Acting on incoherent data is never usable.
     if (execOk < 0.5) return null;
   }
-  if (action === "buy" || action === "swap") {
+  if (action === "buy") {
+    if (!metadata?.engineCandidateId) return null;
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
     params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);
     judgments.push({ qid: AI_QID.sizeBucket, confidence: size.confidence });
     rationale.push(`size=${size.choice} p=${size.confidence.toFixed(2)}`);
-  }
-  if (action === "buy" || action === "swap") {
-    // Acute stress vetoes entries; it never vetoes exits.
+    // Acute stress vetoes new entries; Jev cannot veto deterministic exits.
     if (stress > 0.5) return null;
-  }
-  if (action === "swap") {
-    const tin = choiceOf(answers, AI_QID.swapTokenIn);
-    const tout = choiceOf(answers, AI_QID.swapTokenOut);
-    if (!tin || !tout || tin.choice === tout.choice) return null;
-    // Live proposals must stay inside the exact closed sets sent in this
-    // request. This blocks invented or mismatched token arguments.
-    if (
-      !metadata ||
-      !metadata.candidatesIn.includes(tin.choice) ||
-      !metadata.candidatesOut.includes(tout.choice)
-    ) return null;
-    params.tokenIn = tin.choice;
-    params.tokenOut = tout.choice;
-    judgments.push(
-      { qid: AI_QID.swapTokenIn, confidence: tin.confidence },
-      { qid: AI_QID.swapTokenOut, confidence: tout.confidence },
-    );
-    rationale.push(`${tin.choice}→${tout.choice}`);
   }
   rationale.push(`exec_ok=${execOk.toFixed(2)}`, `stress=${stress.toFixed(2)}`);
 
@@ -277,12 +264,12 @@ export function parseAiProposal(
   if (!Number.isFinite(receivedAt) || !Number.isFinite(snapshotMs) || snapshotMs > receivedAt + 2_000) {
     return null;
   }
+  const engineCandidateId = metadata?.engineCandidateId ?? "advisory-dry-run";
   const proposalId = [
     "jev",
     snapshotMs,
+    engineCandidateId,
     action,
-    params.tokenIn ?? "",
-    params.tokenOut ?? "",
     params.sizePct ?? "",
   ].join(":");
 
@@ -294,6 +281,7 @@ export function parseAiProposal(
     answers,
     rationale: rationale.join(" · "),
     proposalId,
+    engineCandidateId,
     snapshotFetchedAt,
     model: metadata?.model ?? "unknown",
     fetchedAt: receivedAt,

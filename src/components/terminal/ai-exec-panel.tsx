@@ -128,6 +128,11 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
   // Latest engine-produced proposal — the bot loop writes it to the
   // terminal store (ephemeral, cleared on mode change).
   const engineProposal = useTerminal((s) => s.aiProposal);
+  const helperEnabled = useTerminal((s) => s.aiEnabled);
+  const helperLearningMode = useTerminal((s) => s.learningMode);
+  const helperReviewEvery = useTerminal((s) => s.aiReviewEveryTrades);
+  const helperControl = helperEnabled && helperLearningMode === "controlled";
+  const dualControlActive = mode === "control" && helperControl;
 
   function selectMode(m: AiControlMode) {
     if (m === "control" && mode !== "control") {
@@ -232,6 +237,23 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
             · session-only (persisted store flag lands with the core update)
           </span>
         )}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-border bg-bg p-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">Jev trade decisions:</span>
+          <Badge variant={mode === "control" ? "warn" : "outline"}>{mode.toUpperCase()}</Badge>
+          <span className="font-medium">AI Helper:</span>
+          <Badge variant={helperControl ? "leef" : helperEnabled ? "outline" : "secondary"}>
+            {!helperEnabled ? "OFF" : helperControl ? "CONTROLLED LEARNING" : "SUGGEST"}
+          </Badge>
+          {dualControlActive && <Badge variant="leef">Dual AI configuration active</Badge>}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {dualControlActive
+            ? `Jev evaluates each eligible bot decision. The AI Helper reviews accumulated evidence every ${helperReviewEvery} trades and can propose learning changes; the deterministic Learning Governor shadow-tests them before promotion. The Helper is not a second per-trade approver, and neither AI can bypass execution safeguards.`
+            : "The AI Helper is a strategic learning layer, not a second trade executor. CONTROLLED LEARNING lets it propose evidence-backed changes; the deterministic Learning Governor decides whether they earn promotion."}
+        </p>
       </div>
 
       {mode !== "off" && (
@@ -347,6 +369,13 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
                   freshness, USD bounds, learned size ceiling, exact-quote verify, portfolio
                   governor, CPU/NET/RAM preflight, policy firewall and pre-sign simulation.
                   Below the confidence threshold the proposal is logged and ignored.
+                </p>
+                <p>
+                  If the AI Helper is also in CONTROLLED LEARNING, it does not approve each
+                  individual trade. It reviews journal evidence every {helperReviewEvery} trades
+                  and proposes bounded learning artifacts; the deterministic Learning Governor
+                  shadow-tests them before they can affect strategy behaviour. Jev remains the
+                  fast per-cycle judge, while code retains final execution authority.
                 </p>
                 <p>
                   CONTROL sends a compact market summary to TypeSafe Jev via this

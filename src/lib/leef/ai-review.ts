@@ -30,7 +30,56 @@ import {
   injectArtifacts,
   refreshProposals,
 } from "./learning-store";
-import { aggregateEntries, journal, journalAll } from "./journal";
+import { aggregateEntries, journal, journalAll, type JournalEntry } from "./journal";
+
+/**
+ * Compact, structured Jev evidence for the strategic AI Helper. Confidence is
+ * model-reported, not proven calibration; these summaries are for pattern
+ * discovery only and never authorize a trade or change a risk limit.
+ */
+export function buildJevEvidence(entries: JournalEntry[]): Record<string, unknown> {
+  const proposals = entries
+    .filter((e) => e.kind === "ai" && e.aiSource === "jev" && e.decision && Number.isFinite(e.confidence))
+    .sort((a, b) => b.ts - a.ts);
+  const summarize = (items: JournalEntry[]) => {
+    const values = items
+      .map((e) => e.confidence)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1);
+    return {
+      count: items.length,
+      meanReportedConfidence: values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null,
+    };
+  };
+  const byAction: Record<string, JournalEntry[]> = {};
+  const byRegime: Record<string, JournalEntry[]> = {};
+  for (const entry of proposals) {
+    const action = entry.decision ?? "unknown";
+    const regime = entry.regime ?? "unknown";
+    (byAction[action] ??= []).push(entry);
+    (byRegime[regime] ??= []).push(entry);
+  }
+  return {
+    totalProposals: proposals.length,
+    note:
+      "Jev confidence is model-reported, not calibrated accuracy. Proposal counts and confidence do not prove profitability. Do not infer a proposal's outcome unless a matching execution record exists.",
+    byAction: Object.fromEntries(Object.entries(byAction).map(([key, items]) => [key, summarize(items)])),
+    byRegime: Object.fromEntries(Object.entries(byRegime).map(([key, items]) => [key, summarize(items)])),
+    recent: proposals.slice(0, 25).map((e) => ({
+      at: e.ts,
+      action: e.decision,
+      confidence: e.confidence,
+      model: e.aiModel,
+      snapshotAt: e.aiSnapshotAt,
+      strategy: e.strategy,
+      mode: e.mode,
+      regime: e.regime,
+      volatilityPct: e.volPct,
+      dangerScore: e.dangerScore,
+    })),
+  };
+}
 
 /** The evidence_review payload — shared by the desk button and auto-review. */
 export async function evidenceReviewContext(): Promise<Record<string, unknown>> {
@@ -64,13 +113,16 @@ export async function evidenceReviewContext(): Promise<Record<string, unknown>> 
     }));
   return {
     instruction:
-      "Review the evidence. If — and only if — the data supports it, you may add a " +
+      "Review the evidence and the structured Jev proposal history. Treat model-reported " +
+      "confidence as uncalibrated until paired with outcomes; do not infer profitability " +
+      "from confidence alone. If — and only if — the data supports it, you may add a " +
       "`learning_artifacts` array of {type, scopeKey, value, confidence, reason}. " +
       "type must be POOL_SLIPPAGE_PROFILE (expected realized slippage %, 0.02–0.75) or " +
       "POOL_SIZE_MULTIPLIER (size-ceiling factor, 0.5–1.0; 1 = no constraint). scopeKey " +
       "must be a `key` from poolProfiles. Every proposal is shadow-tested by the " +
       "deterministic LearningGovernor before it can affect anything.",
     stats: aggregateEntries(entries),
+    jevEvidence: buildJevEvidence(entries),
     poolProfiles,
     artifacts: getArtifacts().map((a) => ({
       id: a.id,

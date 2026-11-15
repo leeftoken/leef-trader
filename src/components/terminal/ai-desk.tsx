@@ -347,20 +347,6 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
   const strategy = useBot((s) => s.strategy);
   const autoReview = autoReviewStatus();
 
-  /** Unified 3-state: OFF / SUGGEST / CONTROLLED_LEARNING. */
-  const aiMode: "off" | "suggest" | "controlled" = !aiEnabled
-    ? "off"
-    : learningMode === "controlled"
-      ? "controlled"
-      : "suggest";
-  const setAiMode = (m: "off" | "suggest" | "controlled") => {
-    if (m === "off") setAiEnabled(false);
-    else {
-      setAiEnabled(true);
-      setLearningMode(m === "controlled" ? "controlled" : "suggest");
-    }
-  };
-
   const [urlDraft, setUrlDraft] = useState(aiGatewayUrl);
   // Gateway health is derived: a stale entry for a different url/nonce reads
   // as "checking" while the probe below resolves. No setState-in-effect.
@@ -447,30 +433,21 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex rounded-lg border border-border overflow-hidden" role="radiogroup" aria-label="AI mode">
-              {(
-                [
-                  ["off", "OFF"],
-                  ["suggest", "SUGGEST"],
-                  ["controlled", "CONTROLLED LEARNING"],
-                ] as const
-              ).map(([m, label]) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="radio"
-                  aria-checked={aiMode === m}
-                  onClick={() => setAiMode(m)}
-                  className={cn(
-                    "px-2.5 py-1.5 text-xs transition-colors",
-                    aiMode === m
-                      ? "bg-accent/15 text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+              <span className="text-xs text-muted-foreground">AI Helper</span>
+              <button
+                type="button"
+                role="switch"
+                aria-label="AI Helper"
+                aria-checked={aiEnabled}
+                onClick={() => setAiEnabled(!aiEnabled)}
+                className={cn(
+                  "min-w-14 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                  aiEnabled ? "bg-leef/15 text-leef" : "bg-surface-2 text-muted-foreground",
+                )}
+              >
+                {aiEnabled ? "ON" : "OFF"}
+              </button>
             </div>
             <Badge
               variant="outline"
@@ -504,12 +481,9 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
 
         {!aiEnabled ? (
           <div className="mt-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            AI Helper is OFF — zero calls go to its gateway; Jev trade control has its own switch above. <span className="font-medium">SUGGEST</span>:
-            analyst on demand, learning artifacts shadow until you promote them.{" "}
-            <span className="font-medium">CONTROLLED LEARNING</span>: the AI Helper may propose
-            bounded strategy-learning artifacts; the deterministic governor only promotes them
-            after they beat their baseline on fresh evidence. This does not grant the Helper
-            per-trade execution authority.
+            AI Helper is OFF — no requests are sent to its gateway. Turn it ON for market
+            analysis and evidence reviews. It never executes or approves individual trades.
+            Jev has its own separate switch above.
           </div>
         ) : (
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -560,13 +534,30 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
             <div>
               <h3 className="font-semibold">Auto-review</h3>
               <p className="text-sm text-muted-foreground">
-                The analyst reads the evidence journal every N trades and proposes learning
-                artifacts into the governor's shadow pipeline. Never per-trade, never blocking,
-                never on the decision path — the engine trades on while it runs.
+                The Helper reviews outcomes on a schedule. With auto-apply OFF, changes stay
+                in shadow for manual review. With it ON, the deterministic Learning Governor may
+                promote only bounded changes that pass its evidence tests.
               </p>
             </div>
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">Every</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Auto-apply proven learning</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Auto-apply proven learning"
+                  aria-checked={learningMode === "controlled"}
+                  onClick={() => setLearningMode(learningMode === "controlled" ? "suggest" : "controlled")}
+                  className={cn(
+                    "min-w-12 rounded-md px-2 py-1 font-semibold",
+                    learningMode === "controlled" ? "bg-leef/15 text-leef" : "bg-surface-2 text-muted-foreground",
+                  )}
+                >
+                  {learningMode === "controlled" ? "ON" : "OFF"}
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground">Every</span>
               {[5, 10, 20].map((n) => (
                 <button
                   key={n}

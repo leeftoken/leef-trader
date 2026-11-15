@@ -244,7 +244,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">Strategic AI helper control</h3>
             <p className="text-xs text-muted-foreground mt-1">
-              In CONTROL, the helper is a second-key reviewer for Jev buy/swap proposals.
+              In CONTROL, the helper is a independent model reviewer for Jev buy/swap proposals.
               It can veto or abstain, but cannot invent trades, size positions, choose routes,
               sign, or block protective exits.
             </p>

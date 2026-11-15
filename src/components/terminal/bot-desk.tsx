@@ -98,7 +98,8 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const warmup = Math.min(b.series.length, BOT_WARMUP_POINTS);
 
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
-  const winRate = b.stats.closedTrades > 0 ? b.stats.wins / b.stats.closedTrades : null;
+  const closedTrades = Math.max(0, Number(b.stats.closedTrades) || 0);
+  const winRate = closedTrades > 0 ? b.stats.wins / closedTrades : null;
 
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
   /**
@@ -488,7 +489,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 {fmtUsd(b.stats.realizedUsd, 2)}
               </div>
               <div className="text-xs text-muted-foreground">
-                {winRate == null ? "No closed outcomes yet" : `win rate ${(winRate * 100).toFixed(0)}%`} · {b.stats.closedTrades} closed
+                {winRate == null ? "No closed outcomes yet" : `win rate ${(winRate * 100).toFixed(0)}%`} · {closedTrades} closed
               </div>
             </Card>
             <Card className="p-4">
@@ -986,7 +987,8 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
   const startEq = useBot((s) => s.stats.startEquityUsd);
   const trades = useBot((s) => s.stats.trades);
   const wins = useBot((s) => s.stats.wins);
-  const winRate = trades > 0 ? wins / trades : 0;
+  const closedTrades = Math.max(0, Number(useBot((s) => s.stats.closedTrades)) || 0);
+  const winRate = closedTrades > 0 ? wins / closedTrades : null;
   const valueDelta = equityUsd - startEq;
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1015,7 +1017,7 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
           {fmtUsd(valueDelta, 2)}
         </div>
         <div className="text-xs text-muted-foreground">
-          {fmtUsd(equityUsd, 2)} · {trades} trades · {(winRate * 100).toFixed(0)}% win
+          {fmtUsd(equityUsd, 2)} · {trades} executions · {winRate == null ? "win rate unavailable" : `${(winRate * 100).toFixed(0)}% of ${closedTrades} closed`}
         </div>
       </Card>
     </div>

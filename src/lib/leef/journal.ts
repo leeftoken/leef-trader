@@ -49,7 +49,7 @@ export type JournalEntry = {
   mode?: "paper" | "live";
 
   /** decision entries */
-  decision?: "buy" | "sell" | "swap" | "arb" | "hold" | "skip" | "stop" | "error";
+  decision?: "buy" | "sell" | "swap" | "arb" | "reduce_risk" | "hold" | "skip" | "stop" | "error";
   /** Human reason, capped at MAX_REASON_LEN. */
   reason?: string;
   priceUsd?: number;
@@ -129,6 +129,11 @@ export type JournalEntry = {
   cfModel?: "mark" | "requote" | "tape";
   /** The HOLD reason class being judged. */
   holdReasonClass?: string;
+
+  /** AI provenance — structured metadata only; never credentials or raw prompts. */
+  aiSource?: "jev" | "helper";
+  aiModel?: string;
+  aiSnapshotAt?: string;
 
   /** learning entries (artifact lifecycle: proposed/shadow/promoted/rolled_back/expired) */
   artifactId?: string;

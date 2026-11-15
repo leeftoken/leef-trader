@@ -46,9 +46,13 @@ import { classifyRegime, dangerScore } from "@/lib/leef/regime";
 import { maybeAutoReview } from "@/lib/leef/ai-review";
 import {
   AI_EXEC_CONFIDENCE_MIN,
+  AI_PROPOSAL_MAX_AGE_MS,
   aiSummaryOf,
   buildAiQuestions,
   parseAiProposal,
+  isAiProposalFresh,
+  type AiCandidateKind,
+  type AiCandidateSummary,
   type AiProposal,
 } from "@/lib/leef/ai-executor";
 import { askJev } from "@/lib/leef/jev-client";
@@ -89,9 +93,6 @@ import { lastFetchTiming } from "@/lib/fetchJson";
 
 /** Min gap between Jev polls (one request, speculative fan-out). */
 const AI_POLL_MS = 45_000;
-/** A proposal older than this never executes — stale judgments don't trade. */
-const AI_PROPOSAL_MAX_AGE_MS = 120_000;
-
 let aiPollInFlight = false;
 let aiLastPollAt = 0;
 
@@ -104,19 +105,69 @@ function maybeKickAiPoll(
   snap: LeefSnapshot,
   b: ReturnType<typeof useBot.getState>,
   balances: Record<string, number>,
+  mode: "paper" | "live",
+  candidateKind: AiCandidateKind,
+  candidateKey: string,
+  candidateDetails: Omit<AiCandidateSummary, "kind" | "key">,
 ): void {
   if (import.meta.env.MODE === "test") return;
-  if (useTerminal.getState().aiControl === "off") return;
+  const terminal = useTerminal.getState();
+  const aiMode = terminal.aiControl;
+  if (aiMode === "off") return;
+  if (aiMode === "control" && candidateKind === "other") {
+    terminal.setAiProposal(null);
+    aiLastPollAt = 0;
+    return;
+  }
   if (snap.source !== "live") return;
   const now = Date.now();
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
-  const summary = aiSummaryOf(snap, b, balances);
+  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey, candidateDetails);
+  const requestedAt = Date.now();
   void (async () => {
     try {
       const res = await askJev(summary, buildAiQuestions(summary));
-      useTerminal.getState().setAiProposal(res ? parseAiProposal(res.answers) : null);
+      const receivedAt = Date.now();
+      const proposal = res
+        ? parseAiProposal(res.answers, {
+            snapshotFetchedAt: summary.fetchedAt,
+            requestedAt,
+            receivedAt,
+            model: res.model,
+            candidateKind: summary.candidateKind,
+            candidateKey: summary.candidateKey,
+            candidate: summary.candidate,
+            allowedActions: summary.allowedActions,
+          })
+        : null;
+      useTerminal.getState().setAiProposal(proposal);
+      if (proposal) {
+        journal({
+          kind: "ai",
+          aiSource: "jev",
+          aiModel: proposal.model,
+          aiSnapshotAt: proposal.snapshotFetchedAt,
+          decision: proposal.action,
+          strategy: b.strategy,
+          mode,
+          reason: `jev proposal ${proposal.action} · model=${proposal.model} · confidence=${proposal.confidence.toFixed(2)} · snapshot=${proposal.snapshotFetchedAt}`,
+          latencyMs: receivedAt - requestedAt,
+          confidence: proposal.confidence,
+          regime: summary.market.regime,
+          volPct: summary.market.volatilityPct,
+          dangerScore: summary.market.dangerScore,
+          leefUsd: summary.leefUsd,
+          waxUsd: summary.waxUsd,
+        });
+      } else {
+        journal({
+          kind: "ai",
+          reason: "jev proposal unavailable or rejected · no control action",
+          latencyMs: receivedAt - requestedAt,
+        });
+      }
     } finally {
       aiPollInFlight = false;
     }
@@ -518,10 +569,6 @@ async function runBotOnceInner(
     ? swapFlow.tracker.allStates(Date.now())
     : null;
 
-  // Jev poll (suggest/control only; "off" = zero calls). The proposal is
-  // consumed by the AI desk and, in "control", by the seam below.
-  maybeKickAiPoll(snap, b, balances);
-
   let decision = evaluateBot({
     now: Date.now(),
     snap,
@@ -574,6 +621,67 @@ async function runBotOnceInner(
       }`,
     };
   }
+
+  const candidateKind: AiCandidateKind =
+    decision.kind === "buy" ? "buy" : decision.kind === "swap" ? "swap" : "other";
+  const candidateTokenIn =
+    decision.kind === "buy" ? b.quote || "WAX" : decision.kind === "swap" ? decision.tokenIn : undefined;
+  const candidateTokenOut =
+    decision.kind === "buy" ? b.base || "LEEF" : decision.kind === "swap" ? decision.tokenOut : undefined;
+  const candidateTokenInContract = (() => {
+    if (!candidateTokenIn) return undefined;
+    try {
+      return metaOf(candidateTokenIn, snap).contract;
+    } catch {
+      return undefined;
+    }
+  })();
+  const candidateTokenOutContract = (() => {
+    if (!candidateTokenOut) return undefined;
+    try {
+      return metaOf(candidateTokenOut, snap).contract;
+    } catch {
+      return undefined;
+    }
+  })();
+  const candidateDetails: Omit<AiCandidateSummary, "kind" | "key"> =
+    decision.kind === "buy"
+      ? {
+          tokenIn: candidateTokenIn,
+          tokenInContract: candidateTokenInContract,
+          tokenOut: candidateTokenOut,
+          tokenOutContract: candidateTokenOutContract,
+          amountIn: decision.amountIn,
+          amountUsd: decision.amountIn * (usdPriceOf(b.quote || "WAX", snap) || 0),
+          expectedOut: decision.route.amountOut,
+          expectedNetEdgePct: decision.edge?.netEdgePct,
+          priceImpactPct: decision.route.priceImpact * 100,
+          poolIds: decision.route.poolIds,
+          hops: decision.route.legs.length,
+        }
+      : decision.kind === "swap"
+        ? {
+            tokenIn: candidateTokenIn,
+            tokenInContract: candidateTokenInContract,
+            tokenOut: candidateTokenOut,
+            tokenOutContract: candidateTokenOutContract,
+            amountIn: decision.amountIn,
+            amountUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, snap) || 0),
+            expectedOut: decision.route.amountOut,
+            priceImpactPct: decision.route.priceImpact * 100,
+            poolIds: decision.route.poolIds,
+            hops: decision.route.legs.length,
+          }
+        : {};
+  const candidateKey =
+    decision.kind === "buy"
+      ? `${b.strategy}:buy:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
+      : decision.kind === "swap"
+        ? `${b.strategy}:swap:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
+        : "other";
+  // Jev judges the existing strategy/token-pair candidate. It cannot invent
+  // another trade type or token pair; route selection remains engine-owned.
+  maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
 
   b.setLastReason(decision.reason);
 
@@ -662,83 +770,89 @@ async function runBotOnceInner(
     if (mult < 1) bounds = { ...boundsRaw, maxIn: boundsRaw.maxIn * mult };
   }
 
-  // ── Jev (AI) control seam ─────────────────────────────────────────────
-  // "off": zero Jev calls (the poll above never fired). "suggest": proposals
-  // only surface on the AI desk. "control": a FRESH proposal whose weakest
-  // judgment clears AI_EXEC_CONFIDENCE_MIN replaces the engine's decision and
-  // runs the SAME unchanged gauntlet below (bounds → learned ceiling → size
-  // re-scan → exact/verify gates → governor → resource preflight → policy →
-  // simulation → sign → reconcile). Stale/absent/low-confidence judgments
-  // pause ENTRIES (logged no-op); protective engine exits (sell/stop) always
-  // still pass — the AI can never suppress a risk exit.
-  if (useTerminal.getState().aiControl === "control" && decision.kind !== "sell") {
+  // ── Jev (AI) candidate-judgement seam ─────────────────────────────────
+  // Jev may ACCEPT or REJECT only the exact buy/swap candidate already
+  // generated by the deterministic engine. The proposal is bound to snapshot,
+  // candidate kind, token pair, amount and route signature; Jev cannot invent
+  // a new action, token pair, amount or route. CONTROL requires a fresh,
+  // high-confidence matching judgement. Rejected, stale or mismatched
+  // candidates pause; protective engine exits (sell/stop) bypass Jev and
+  // always remain active. Accepted candidates still pass the unchanged
+  // gauntlet below (bounds → learned ceiling → size re-scan → exact/verify
+  // gates → governor → resource preflight → policy → simulation → sign →
+  // reconcile).
+  if (
+    useTerminal.getState().aiControl === "control" &&
+    (decision.kind === "buy" || decision.kind === "swap")
+  ) {
     const p = useTerminal.getState().aiProposal;
+    const currentSnapshotAt = snapFreshAtMs(snap);
     const fresh: AiProposal | null =
-      p && cycleT0 - p.fetchedAt <= AI_PROPOSAL_MAX_AGE_MS ? p : null;
+      Number.isFinite(currentSnapshotAt) &&
+      isAiProposalFresh(
+        p,
+        new Date(currentSnapshotAt).toISOString(),
+        cycleT0,
+        AI_PROPOSAL_MAX_AGE_MS,
+      ) &&
+      p?.candidateKind === decision.kind &&
+      p?.candidateKey === candidateKey
+        ? p
+        : null;
     const aiHold = (reason: string): Decision => {
       b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
       b.setLastReason(reason);
       return { kind: "hold", reason };
     };
     if (!fresh) {
-      return aiHold("AI control: no fresh Jev judgment — entries paused, exits still managed");
+      return aiHold("AI control: no fresh Jev judgement for this exact engine candidate — candidate paused");
     }
     journal({
-      kind: "gate", gate: "ai",
+      kind: "gate",
+      gate: "ai",
       pass: fresh.confidence >= AI_EXEC_CONFIDENCE_MIN,
-      reason: `Jev ${fresh.action} · weakest=${fresh.weakest} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`,
-      strategy: b.strategy, mode,
-      leefUsd: book.leefUsd, waxUsd: book.waxUsd,
+      reason: `Jev ${fresh.action} ${fresh.candidateKind} candidate · weakest=${fresh.weakest} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`,
+      strategy: b.strategy,
+      mode,
+      leefUsd: book.leefUsd,
+      waxUsd: book.waxUsd,
     });
     if (fresh.confidence < AI_EXEC_CONFIDENCE_MIN) {
       return aiHold(
-        `AI control: Jev ${fresh.action} below confidence floor (${fresh.confidence.toFixed(2)} < ${AI_EXEC_CONFIDENCE_MIN}) — no-op`,
+        `AI control: Jev ${fresh.action} below confidence floor (${fresh.confidence.toFixed(2)} < ${AI_EXEC_CONFIDENCE_MIN}) — candidate paused`,
       );
     }
-    const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
-    const tag = `AI · Jev ${fresh.action} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;
     if (fresh.action === "hold") {
-      return aiHold(`AI control: Jev hold · ${fresh.rationale}`);
+      return aiHold(`AI control: Jev rejected the ${fresh.candidateKind} candidate — ${fresh.rationale}`);
     }
-    if (fresh.action === "buy") {
-      const probeIn = Math.min(bounds.maxIn, Math.max(bounds.minIn, bounds.maxIn * sizePct));
-      const route = bestExecutionRoute(book.pools, book.aux, probeIn, quoteTok, baseTok);
-      if (!route) return aiHold("AI control: Jev buy has no executable route on this book");
-      decision = { kind: "buy", amountIn: probeIn, route, reason: tag, confidence: fresh.confidence };
-    } else if (fresh.action === "sell" || fresh.action === "reduce_risk") {
-      if (!b.position || !(b.position.amountLeef > 0)) {
-        return aiHold(`AI control: Jev ${fresh.action} but no open position — no-op`);
+    const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
+    const tag = `AI · Jev accepted ${fresh.candidateKind} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;
+    if (fresh.action === "buy" && decision.kind === "buy") {
+      // Jev's bucket is a HARD CAP on the engine candidate, never a request
+      // to increase it. If the selected fraction falls below minTrade, sit out.
+      const jevMaxIn = Math.min(bounds.maxIn, decision.amountIn * sizePct);
+      if (jevMaxIn + 1e-12 < bounds.minIn) {
+        return aiHold("AI control: Jev size bucket falls below the deterministic minimum trade — candidate paused");
       }
-      if (b.position.mode !== mode) {
-        return aiHold(
-          `AI control: position was opened in ${b.position.mode} mode — ${
-            b.position.mode === "live" ? "re-import the key to manage it" : "forget the live key first"
-          }`,
-        );
-      }
-      // Partial-exit accounting is not implemented: the shared sell executor
-      // books PnL against the FULL entry cost and clears the tracked position
-      // (setPosition(null)), so AI exits are always FULL — the size bucket is
-      // advisory for entries/swaps only and is ignored here.
-      const amount = b.position.amountLeef;
-      const route = bestExecutionRoute(book.pools, book.aux, amount, baseTok, quoteTok);
-      if (!route) return aiHold("AI control: Jev exit has no executable route on this book");
-      decision = { kind: "sell", amountLeef: amount, route, reason: tag, confidence: fresh.confidence };
-    } else if (fresh.action === "swap") {
-      const tokenIn = fresh.params.tokenIn ?? "";
-      const tokenOut = fresh.params.tokenOut ?? "";
+      bounds = {
+        ...bounds,
+        maxIn: jevMaxIn,
+        effectiveMaxUsd: Math.min(bounds.effectiveMaxUsd, jevMaxIn * bounds.quoteUsd),
+      };
+      const route = bestExecutionRoute(book.pools, book.aux, jevMaxIn, quoteTok, baseTok);
+      if (!route) return aiHold("AI control: accepted buy candidate has no executable route on the refreshed book");
+      decision = { kind: "buy", amountIn: jevMaxIn, route, reason: tag, confidence: fresh.confidence };
+    } else if (fresh.action === "swap" && decision.kind === "swap") {
+      const tokenIn = decision.tokenIn;
+      const tokenOut = decision.tokenOut;
       const held = balances[tokenIn] ?? 0;
-      if (!tokenIn || !tokenOut || tokenIn === tokenOut || !(held > 0)) {
-        return aiHold("AI control: Jev swap args incoherent with the wallet — no-op");
-      }
-      const amountIn = held * sizePct;
+      if (!(held > 0)) return aiHold("AI control: swap candidate input is no longer held");
+      const amountIn = decision.amountIn * sizePct;
       const route = bestExecutionRoute(book.pools, book.aux, amountIn, tokenIn, tokenOut);
-      if (!route) return aiHold("AI control: Jev swap has no executable route on this book");
-      decision = { kind: "swap", tokenIn, tokenOut, amountIn, route, reason: tag, minNetPct: 0 };
+      if (!route) return aiHold("AI control: accepted swap candidate has no executable route on the refreshed book");
+      decision = { ...decision, amountIn, route, reason: tag };
     } else {
-      // rebalance / cancel_all: no resting orders exist and the portfolio
-      // loop owns rebalancing — the proposal stays desk-advisory.
-      return aiHold(`AI control: Jev ${fresh.action} is advisory here (rebalancer owns it) — no-op`);
+      return aiHold("AI control: Jev response did not match the deterministic candidate type");
     }
   }
 

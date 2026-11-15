@@ -54,11 +54,21 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
     return { at, status: "unavailable", reason };
   }
   const res = await askJev(summary, questions);
+  const receivedAt = Date.now();
   if (!res) {
     journal({ kind: "ai", reason: "jev dry-run: advisory unavailable (null response)" });
     return { at, status: "unavailable", reason: "Jev returned no answer (advisory unavailable)" };
   }
-  const proposal = parseAiProposal(res.answers);
+  const proposal = parseAiProposal(res.answers, {
+    snapshotFetchedAt: summary.fetchedAt,
+    requestedAt: at,
+    receivedAt,
+    model: res.model,
+    candidateKind: summary.candidateKind,
+    candidateKey: summary.candidateKey,
+    candidate: summary.candidate,
+    allowedActions: summary.allowedActions,
+  });
   if (!proposal) {
     journal({ kind: "ai", reason: "jev dry-run: answer unusable, no proposal" });
     return { at, status: "rejected", reason: "Jev answer did not yield a usable proposal" };
@@ -76,8 +86,8 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
 
 /**
  * Derive a Swap-desk prefill from a proposal plus live bot/wallet state.
- * Proposals carry no amountIn (and buy/sell carry no token params), so the
- * amounts come from the same state the control seam would use. Returns null
+ * Proposals carry the engine candidate's input amount and (for swaps) its
+ * exact token pair. Prefills are capped by current balances. Returns null
  * when a coherent prefill can't be derived — the caller hides the button.
  */
 function swapPrefill(
@@ -89,22 +99,14 @@ function swapPrefill(
   const balances = useWallet.getState().balances();
   const sizePct = Math.min(100, Math.max(1, Number(p.params.sizePct ?? "100"))) / 100;
   if (p.action === "buy") {
-    const amount = (balances[quote] ?? 0) * sizePct;
+    const amount = Math.min(p.candidate?.amountIn ?? balances[quote] ?? 0, balances[quote] ?? 0) * sizePct;
     return amount > 0 ? { tokenIn: quote, tokenOut: base, amountIn: String(amount) } : null;
-  }
-  if (p.action === "sell" || p.action === "reduce_risk") {
-    // Full tracked position — AI exits are always full (no partial-exit
-    // accounting), so the desk prefill matches what CONTROL would trade.
-    const amount = b.position?.amountLeef ?? 0;
-    return amount > 0 ? { tokenIn: base, tokenOut: quote, amountIn: String(amount) } : null;
   }
   if (p.action === "swap") {
     const tokenIn = p.params.tokenIn;
     const tokenOut = p.params.tokenOut;
     if (!tokenIn || !tokenOut || tokenIn === tokenOut) return null;
-    const amountIn = Number(p.params.amountIn) > 0
-      ? Number(p.params.amountIn)
-      : (balances[tokenIn] ?? 0) * sizePct; // same derivation the seam uses
+    const amountIn = Math.min(p.candidate?.amountIn ?? balances[tokenIn] ?? 0, balances[tokenIn] ?? 0) * sizePct;
     return amountIn > 0 ? { tokenIn, tokenOut, amountIn: String(amountIn) } : null;
   }
   return null;
@@ -113,7 +115,7 @@ function swapPrefill(
 const MODE_COPY: Record<AiControlMode, string> = {
   off: "Zero Jev calls leave this browser.",
   suggest: "Jev proposals are advisory — you apply them by hand.",
-  control: `Jev may execute proposals at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN} — through every risk gate.`,
+  control: `Jev may steer an eligible engine candidate at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN}; engine HOLDs and every hard risk gate remain authoritative.`,
 };
 
 export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
@@ -128,6 +130,11 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
   // Latest engine-produced proposal — the bot loop writes it to the
   // terminal store (ephemeral, cleared on mode change).
   const engineProposal = useTerminal((s) => s.aiProposal);
+  const helperEnabled = useTerminal((s) => s.aiEnabled);
+  const helperLearningMode = useTerminal((s) => s.learningMode);
+  const helperReviewEvery = useTerminal((s) => s.aiReviewEveryTrades);
+  const helperControl = helperEnabled && helperLearningMode === "controlled";
+  const dualControlActive = mode === "control" && helperControl;
 
   function selectMode(m: AiControlMode) {
     if (m === "control" && mode !== "control") {
@@ -142,7 +149,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
     setBusy(true);
     try {
       const run = await runJevDryRun(
-        aiSummaryOf(snap, useBot.getState(), useWallet.getState().balances()),
+        aiSummaryOf(snap, useBot.getState(), useWallet.getState().balances(), "preview", "dry-run"),
       );
       setRuns((prev) => [run, ...prev].slice(0, 20));
     } finally {
@@ -232,6 +239,23 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
             · session-only (persisted store flag lands with the core update)
           </span>
         )}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-border bg-bg p-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">Jev trade decisions:</span>
+          <Badge variant={mode === "control" ? "warn" : "outline"}>{mode.toUpperCase()}</Badge>
+          <span className="font-medium">AI Helper:</span>
+          <Badge variant={helperControl ? "leef" : helperEnabled ? "outline" : "secondary"}>
+            {!helperEnabled ? "OFF" : helperControl ? "CONTROLLED LEARNING" : "SUGGEST"}
+          </Badge>
+          {dualControlActive && <Badge variant="leef">Dual AI configuration active</Badge>}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {dualControlActive
+            ? `Jev evaluates each eligible bot decision. The AI Helper reviews accumulated evidence every ${helperReviewEvery} trades and can propose learning changes; the deterministic Learning Governor shadow-tests them before promotion. The Helper is not a second per-trade approver, and neither AI can bypass execution safeguards.`
+            : "The AI Helper is a strategic learning layer, not a second trade executor. CONTROLLED LEARNING lets it propose evidence-backed changes; the deterministic Learning Governor decides whether they earn promotion."}
+        </p>
       </div>
 
       {mode !== "off" && (
@@ -340,13 +364,20 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
               <div className="space-y-2 text-sm">
                 <p>
                   In CONTROL, Jev proposals scoring confidence ≥ {AI_EXEC_CONFIDENCE_MIN}{" "}
-                  become trade candidates <span className="font-medium">with real funds</span>.
+                  may steer an already eligible engine candidate <span className="font-medium">with real funds</span>. Jev cannot create a trade when the deterministic engine says HOLD.
                 </p>
                 <p>
                   Every AI trade passes the same gates as the deterministic bot: book
                   freshness, USD bounds, learned size ceiling, exact-quote verify, portfolio
                   governor, CPU/NET/RAM preflight, policy firewall and pre-sign simulation.
                   Below the confidence threshold the proposal is logged and ignored.
+                </p>
+                <p>
+                  If the AI Helper is also in CONTROLLED LEARNING, it does not approve each
+                  individual trade. It reviews journal evidence every {helperReviewEvery} trades
+                  and proposes bounded learning artifacts; the deterministic Learning Governor
+                  shadow-tests them before they can affect strategy behaviour. Jev remains the
+                  fast per-cycle judge, while code retains final execution authority.
                 </p>
                 <p>
                   CONTROL sends a compact market summary to TypeSafe Jev via this

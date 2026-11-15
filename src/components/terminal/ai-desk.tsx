@@ -434,14 +434,15 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
               <Brain className="size-5" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold">AI analyst</h2>
+              <h2 className="text-lg font-semibold">AI Helper · strategic learning</h2>
               <p className="text-sm text-muted-foreground max-w-prose">
                 Your Cloudflare gateway ({hostLabel(aiGatewayUrl)}) sends a
                 compact context to the model and returns structured commentary. The AI is an{" "}
                 <span className="font-medium text-foreground">analyst, never the trading engine</span>{" "}
                 — it cannot sign, cannot override a gate, and every response carries{" "}
-                <code className="text-xs">trade_authorization: false</code>. The deterministic
-                pipeline keeps trading if the gateway is down.
+                <code className="text-xs">trade_authorization: false</code>. In CONTROLLED LEARNING,
+                it can propose bounded learning changes; the deterministic governor validates
+                them against evidence before promotion. It is not a second per-trade approver.
               </p>
             </div>
           </div>
@@ -451,7 +452,7 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
                 [
                   ["off", "OFF"],
                   ["suggest", "SUGGEST"],
-                  ["controlled", "CONTROLLED"],
+                  ["controlled", "CONTROLLED LEARNING"],
                 ] as const
               ).map(([m, label]) => (
                 <button
@@ -503,11 +504,12 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
 
         {!aiEnabled ? (
           <div className="mt-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            AI is OFF — zero calls leave this browser. <span className="font-medium">SUGGEST</span>:
+            AI Helper is OFF — zero calls go to its gateway; Jev trade control has its own switch above. <span className="font-medium">SUGGEST</span>:
             analyst on demand, learning artifacts shadow until you promote them.{" "}
-            <span className="font-medium">CONTROLLED</span>: the deterministic governor may
-            auto-promote artifacts that beat their baseline on fresh evidence. Trading never
-            depends on any of it.
+            <span className="font-medium">CONTROLLED LEARNING</span>: the AI Helper may propose
+            bounded strategy-learning artifacts; the deterministic governor only promotes them
+            after they beat their baseline on fresh evidence. This does not grant the Helper
+            per-trade execution authority.
           </div>
         ) : (
           <div className="mt-4 flex flex-wrap items-center gap-2">

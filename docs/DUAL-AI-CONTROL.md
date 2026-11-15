@@ -19,7 +19,7 @@ AI helper modes are OFF, SUGGEST, and CONTROL:
 For a deterministic engine BUY candidate in combined CONTROL, all of the following must be true:
 
 1. Jev returns a valid typed proposal and its weakest relevant judgment meets the existing 0.75 confidence floor.
-2. The proposal is bound to a valid source snapshot and is neither stale nor future-dated.
+2. The proposal is bound to the exact deterministic candidate identity and its source snapshot. The source snapshot must be fresh and not future-dated; the candidate identity remains stable across successive fresh pulls only while pair, amount, route, edge bucket, and impact remain materially unchanged.
 3. The AI helper returns a valid `control_review` object whose `candidate_id` exactly matches the Jev proposal ID.
 4. The helper review references the same snapshot timestamp, is no older than 45 seconds, and its source market snapshot is no older than 90 seconds.
 5. The helper decision is exactly `approve`, its confidence is at least 0.82, and `risk_flags` is empty.

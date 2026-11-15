@@ -29,7 +29,7 @@ A missing response, timeout, malformed schema, candidate mismatch, stale/future 
 
 Protective engine SELL and STOP decisions are not subject to the helper approval gate. Jev is not allowed to choose exits; the engine's exit logic remains authoritative. The helper cannot delay or veto risk-reducing exits. The standard sell, stop, sizing, route, portfolio, resource, policy, simulation, signing, and reconciliation protections remain in force.
 
-The engine's existing HOLD path remains conservative: Jev cannot manufacture an entry when the deterministic engine has already returned a HOLD or STOP. Jev also cannot replace a SELL, STOP, ARB, or SWAP decision. The AI control seam only runs on deterministic BUY candidates that pass the engine's earlier eligibility checks.
+The engine's existing HOLD path remains conservative: Jev cannot manufacture an entry when the deterministic engine has already returned a HOLD or STOP. Jev also cannot replace a SELL, STOP, ARB, or SWAP decision. In Jev CONTROL, unsupported engine SWAP and ARB actions are explicitly paused; they cannot bypass the BUY-candidate review. The AI control seam only runs on deterministic BUY candidates that pass the engine's earlier eligibility checks. SELL and STOP remain engine-protective actions.
 
 ## Gateway contract — release gate
 

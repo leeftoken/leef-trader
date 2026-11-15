@@ -1876,7 +1876,7 @@ async function runBotOnceInner(
       b.setPosition(null);
       b.setGridAnchor(usdPriceOf(b.base || "LEEF", book) || snap.leefUsd);
       b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, pnlUsd));
-      b.recordResult(pnlUsd, equityUsd + pnlUsd);
+      b.recordResult(pnlUsd, equityUsd + pnlUsd, mode);
       // A successful execution breaks the consecutive-rejection run.
       b.clearRejectionStreak();
       // Calibration: predicted edge (stored at entry) vs the realized edge.
@@ -2030,7 +2030,7 @@ async function runBotOnceInner(
       b.clearRejectionStreak();
       if (b.strategy === "volume" || /Volume tape|Unleashed tape/i.test(decision.reason)) {
         b.recordVolume(inUsd + outUsd, -tapePnl);
-        b.recordResult(tapePnl, equityUsd + tapePnl);
+        b.recordResult(tapePnl, equityUsd + tapePnl, mode);
       }
       b.pushDecision({
         kind: "swap",
@@ -2234,7 +2234,7 @@ async function runBotOnceInner(
           ? realizedQuote * quoteMarkUsd
           : (plan.quoteOut - plan.quoteIn) * quoteMarkUsd;
       b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, pnlUsd));
-      b.recordResult(pnlUsd, equityUsd + pnlUsd);
+      b.recordResult(pnlUsd, equityUsd + pnlUsd, mode);
       // A successful execution breaks the consecutive-rejection run.
       b.clearRejectionStreak();
       // Calibration: the router-quoted edge vs what the chain actually paid.

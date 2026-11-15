@@ -146,7 +146,7 @@ function helperDeterministicContext(
       maxImpactPct: b.risk.maxImpactPct,
       maxPositionUsd: b.risk.maxPositionUsd,
       maxQuoteAgeSec: b.risk.maxQuoteAgeSec,
-      maxDrawdownPct: b.risk.maxDrawdownPct,
+      maxDrawdownPct: b.goals.maxDrawdownPct,
       slippagePct: b.risk.slippage,
     },
   };

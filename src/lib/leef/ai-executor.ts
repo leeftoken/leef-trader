@@ -41,7 +41,9 @@ export interface AiCandidateSummary {
   kind: AiCandidateKind;
   key: string;
   tokenIn?: string;
+  tokenInContract?: string;
   tokenOut?: string;
+  tokenOutContract?: string;
   amountIn?: number;
   amountUsd?: number;
   expectedOut?: number;

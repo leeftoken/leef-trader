@@ -48,7 +48,7 @@ export function AiHelperSupervisor() {
         );
         const result = await aiTask("opportunity_explanation", payload, {
           url: gatewayUrl,
-          timeoutMs: 12_000,
+          timeoutMs: 25_000,
         });
         const review = helperReviewOfResult(result, proposal, Date.now());
         const current = useTerminal.getState();

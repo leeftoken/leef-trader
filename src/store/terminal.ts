@@ -221,7 +221,7 @@ export const useTerminal = create<TerminalState>()(
   togglePoolDir: () => set({ poolDir: get().poolDir === "asc" ? "desc" : "asc" }),
   setTickPool: (tickPoolId) => set({ tickPoolId }),
   setSyncSec: (sec) => set({ syncSec: clampSyncSec(sec) }),
-  setAiGatewayUrl: (aiGatewayUrl) => set({ aiGatewayUrl }),
+  setAiGatewayUrl: (aiGatewayUrl) => set({ aiGatewayUrl, aiHelperReview: null }),
     }),
     {
       name: "leef-terminal-sync",

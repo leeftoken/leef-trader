@@ -14,6 +14,7 @@ import {
   markFailed,
   markReconciling,
   markUnknown,
+  pendingTxid,
   unknownBlockReason,
 } from "./trade-cycle";
 import { reconcileTransfersLater, waitForTransaction, type ReconcileResult } from "./reconcile";
@@ -75,13 +76,27 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
     } else {
       markUnknown(txid);
       await opts.onSettled?.(reconciliation);
-      // Read-only background reconciliation. UNKNOWN remains locked until
-      // chain truth says confirmed or failed.
-      void reconcileTransfersLater(txid).then(async (later) => {
-        if (later.status === "confirmed") markConfirmed();
-        else if (later.status === "failed") markFailed();
-        await opts.onSettled?.(later);
-      });
+      // Read-only background reconciliation. Inclusion alone is not a fill:
+      // retry history reads while this tx owns the capital lock, and release
+      // only after transfer actions are parsed or two indexers prove failure.
+      void (async () => {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          if (pendingTxid() !== txid) return;
+          const later = await reconcileTransfersLater(txid);
+          if (later.status === "failed") {
+            markFailed();
+            await opts.onSettled?.(later);
+            return;
+          }
+          if (later.status === "confirmed" && later.transfers.length > 0) {
+            markConfirmed();
+            await opts.onSettled?.(later);
+            return;
+          }
+          markUnknown(txid);
+        }
+        // Still unresolved. Keep the lock; never retry an ambiguous broadcast.
+      })();
     }
     return { value, txid, reconciliation };
   } catch (err) {

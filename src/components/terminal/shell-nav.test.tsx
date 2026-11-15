@@ -11,9 +11,10 @@ describe("DesktopNav information architecture", () => {
 
   it("keeps the seven high-frequency desks in the main desktop navigation", () => {
     render(<DesktopNav poolCount={8} />);
-    for (const label of ["Overview", "Live tick", "Swap", "Pools", "Portfolio", "AI Bot", "Wallet", "Tools"]) {
+    for (const label of ["Overview", "Live tick", "Swap", "Portfolio", "AI Bot", "Wallet", "Tools"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+    expect(screen.getByRole("button", { name: /^Pools/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "SAT treasury" })).not.toBeInTheDocument();
   });
 

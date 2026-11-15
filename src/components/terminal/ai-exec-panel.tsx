@@ -121,7 +121,7 @@ function swapPrefill(
 const MODE_COPY: Record<AiControlMode, string> = {
   off: "Zero Jev calls leave this browser.",
   suggest: "Jev proposals are advisory — you apply them by hand.",
-  control: `Jev may execute proposals at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN} — through every risk gate.`,
+  control: `Jev may steer an eligible engine candidate at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN}; engine HOLDs and every hard risk gate remain authoritative.`,
 };
 
 export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
@@ -370,7 +370,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
               <div className="space-y-2 text-sm">
                 <p>
                   In CONTROL, Jev proposals scoring confidence ≥ {AI_EXEC_CONFIDENCE_MIN}{" "}
-                  become trade candidates <span className="font-medium">with real funds</span>.
+                  may steer an already eligible engine candidate <span className="font-medium">with real funds</span>. Jev cannot create a trade when the deterministic engine says HOLD.
                 </p>
                 <p>
                   Every AI trade passes the same gates as the deterministic bot: book

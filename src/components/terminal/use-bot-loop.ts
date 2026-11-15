@@ -628,15 +628,29 @@ async function runBotOnceInner(
     decision.kind === "buy" ? b.quote || "WAX" : decision.kind === "swap" ? decision.tokenIn : undefined;
   const candidateTokenOut =
     decision.kind === "buy" ? b.base || "LEEF" : decision.kind === "swap" ? decision.tokenOut : undefined;
-  const candidateTokenInMeta = candidateTokenIn ? metaOf(candidateTokenIn, snap) : undefined;
-  const candidateTokenOutMeta = candidateTokenOut ? metaOf(candidateTokenOut, snap) : undefined;
+  const candidateTokenInContract = (() => {
+    if (!candidateTokenIn) return undefined;
+    try {
+      return metaOf(candidateTokenIn, snap).contract;
+    } catch {
+      return undefined;
+    }
+  })();
+  const candidateTokenOutContract = (() => {
+    if (!candidateTokenOut) return undefined;
+    try {
+      return metaOf(candidateTokenOut, snap).contract;
+    } catch {
+      return undefined;
+    }
+  })();
   const candidateDetails: Omit<AiCandidateSummary, "kind" | "key"> =
     decision.kind === "buy"
       ? {
           tokenIn: candidateTokenIn,
-          tokenInContract: candidateTokenInMeta?.contract,
+          tokenInContract: candidateTokenInContract,
           tokenOut: candidateTokenOut,
-          tokenOutContract: candidateTokenOutMeta?.contract,
+          tokenOutContract: candidateTokenOutContract,
           amountIn: decision.amountIn,
           amountUsd: decision.amountIn * (usdPriceOf(b.quote || "WAX", snap) || 0),
           expectedOut: decision.route.amountOut,
@@ -648,9 +662,9 @@ async function runBotOnceInner(
       : decision.kind === "swap"
         ? {
             tokenIn: candidateTokenIn,
-            tokenInContract: candidateTokenInMeta?.contract,
+            tokenInContract: candidateTokenInContract,
             tokenOut: candidateTokenOut,
-            tokenOutContract: candidateTokenOutMeta?.contract,
+            tokenOutContract: candidateTokenOutContract,
             amountIn: decision.amountIn,
             amountUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, snap) || 0),
             expectedOut: decision.route.amountOut,
@@ -661,9 +675,9 @@ async function runBotOnceInner(
         : {};
   const candidateKey =
     decision.kind === "buy"
-      ? `${b.strategy}:buy:${candidateTokenIn}@${candidateTokenInMeta?.contract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutMeta?.contract ?? "unknown"}:${routeSignature(decision.route)}`
+      ? `${b.strategy}:buy:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
       : decision.kind === "swap"
-        ? `${b.strategy}:swap:${candidateTokenIn}@${candidateTokenInMeta?.contract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutMeta?.contract ?? "unknown"}:${routeSignature(decision.route)}`
+        ? `${b.strategy}:swap:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
         : "other";
   // Jev judges the existing strategy/token-pair candidate. It cannot invent
   // another trade type or token pair; route selection remains engine-owned.

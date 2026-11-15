@@ -10,7 +10,8 @@ import { classifyRegime, dangerScore } from "./regime";
 import type { JevAnswers, JevQuestion } from "./jev-client";
 import { snapFreshAtMs, type LeefSnapshot } from "./types";
 
-export type AiAction = "hold" | "buy" | "sell" | "swap" | "reduce_risk";
+export type AiAction = "hold" | "buy" | "swap";
+export type AiCandidateKind = "buy" | "swap" | "other" | "preview";
 
 export interface AiProposal {
   action: AiAction;
@@ -35,6 +36,8 @@ export interface AiProposalContext {
   requestedAt: number;
   receivedAt: number;
   model: string;
+  candidateKind: AiCandidateKind;
+  allowedActions: readonly AiAction[];
   candidatesIn: readonly string[];
   candidatesOut: readonly string[];
 }
@@ -58,7 +61,7 @@ export const AI_QID = {
   riskExecute: "risk_execute",
 } as const;
 
-const AI_ACTIONS: AiAction[] = ["hold", "buy", "sell", "swap", "reduce_risk"];
+const AI_ACTIONS: AiAction[] = ["hold", "buy", "swap"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
@@ -111,6 +114,10 @@ export interface AiSnapshotSummary {
   }[];
   /** Contract-aware token inventory for the model's context and audit trail. */
   tokenUniverse: { symbol: string; contract: string }[];
+  /** The deterministic engine candidate Jev is judging this cycle. */
+  candidateKind: AiCandidateKind;
+  /** Actions permitted for this exact candidate; the parser enforces this set. */
+  allowedActions: AiAction[];
   /** Closed sets for swap arguments. The parser checks answers against them. */
   candidatesIn: string[];
   candidatesOut: string[];
@@ -154,6 +161,7 @@ export function aiSummaryOf(
   snap: LeefSnapshot,
   b: AiBotSlice,
   balances: Record<string, number>,
+  candidateKind: AiCandidateKind = "other",
 ): AiSnapshotSummary {
   const quote = (b.quote || "WAX").toUpperCase();
   const base = (b.base || "LEEF").toUpperCase();
@@ -205,6 +213,14 @@ export function aiSummaryOf(
   const poolSymbols = new Set(tokenUniverse.map((t) => t.symbol));
   const candidatesIn = [...new Set(held.filter((s) => poolSymbols.has(s)))].sort();
   const candidatesOut = [...poolSymbols].sort();
+  const allowedActions: AiAction[] =
+    candidateKind === "buy"
+      ? ["hold", "buy"]
+      : candidateKind === "swap"
+        ? ["hold", "swap"]
+        : candidateKind === "preview"
+          ? ["hold", "buy", "swap"]
+          : ["hold"];
 
   const position = b.position;
   const positionEntryUsd = position?.entryUsd ?? 0;
@@ -265,6 +281,8 @@ export function aiSummaryOf(
         change24: p.change24,
       })),
     tokenUniverse,
+    candidateKind,
+    allowedActions,
     candidatesIn: candidatesIn.length > 0 ? candidatesIn : [quote],
     candidatesOut: candidatesOut.length > 0 ? candidatesOut : [base, quote],
   };
@@ -276,43 +294,27 @@ export function aiSummaryOf(
  * actually execute; unsupported rebalancing/cancel actions are not offered.
  */
 export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, JevQuestion> {
-  return {
+  const actionCriteria: Record<string, string> = {
+    hold: "Reject this candidate and do nothing this cycle.",
+  };
+  if (summary.allowedActions.includes("buy")) {
+    actionCriteria.buy = "Accept the deterministic engine's already-generated buy candidate. Do not change its token pair or invent a route.";
+  }
+  if (summary.allowedActions.includes("swap")) {
+    actionCriteria.swap = "Accept the deterministic engine's already-generated swap candidate. Do not change its token pair or invent a route.";
+  }
+
+  const questions: Record<string, JevQuestion> = {
     [AI_QID.action]: {
       type: "choice",
       instructions:
-        "Given the live market and portfolio state, choose the single best action THIS cycle. Prefer hold when the evidence is weak, the market is stressed, data is stale, or no worthwhile setup exists. Do not invent prices, routes, amounts, or tokens.",
-      criteria: {
-        hold: "Do nothing this cycle and preserve capital.",
-        buy: "Enter/add the configured base position using the configured quote token, only if the engine's deterministic candidate remains valid.",
-        sell: "Exit the full tracked base position into the configured quote token.",
-        swap: "Swap between two held and route-eligible tokens from the supplied closed candidate sets.",
-        reduce_risk: "Exit the full tracked base position to reduce portfolio exposure.",
-      },
-    },
-    [AI_QID.sizeBucket]: {
-      type: "choice",
-      instructions:
-        "IF the action is buy or swap, choose the fraction of the deployable input balance to request. The deterministic governor may reduce it further. Exits are full-position only; do not choose an exit size.",
-      criteria: {
-        quarter: "25% — cautious clip.",
-        half: "50% — moderate clip.",
-        full: "100% — full deployable amount, still subject to deterministic limits.",
-      },
-    },
-    [AI_QID.swapTokenIn]: {
-      type: "choice",
-      instructions: "IF the action is swap, choose the input token from state.candidatesIn. Never invent or rename a token.",
-      criteria: Object.fromEntries(summary.candidatesIn.map((t) => [t, "Spend " + t + "."])),
-    },
-    [AI_QID.swapTokenOut]: {
-      type: "choice",
-      instructions: "IF the action is swap, choose the output token from state.candidatesOut. Never invent or rename a token.",
-      criteria: Object.fromEntries(summary.candidatesOut.map((t) => [t, "Receive " + t + "."])),
+        "Judge ONLY the deterministic engine candidate identified in state.candidateKind. Choose hold to reject it, or the matching candidate action to accept it. Never invent a new trade or change the candidate type.",
+      criteria: actionCriteria,
     },
     [AI_QID.riskStress]: {
       type: "noul",
       instructions:
-        "Is the market under acute stress RIGHT NOW such that new entries are dangerous? Consider state.market.regime, volatilityPct, poolDislocationPct, dangerScore, liquidity and recent failures.",
+        "Is the market under acute stress RIGHT NOW such that this candidate should be rejected? Consider state.market.regime, volatilityPct, poolDislocationPct, dangerScore, liquidity and recent failures.",
       criteria: {
         true: "Clear evidence of acute stress, cascade risk, dislocation or broken liquidity.",
         false: "Market is orderly enough for its observed liquidity and regime.",
@@ -321,13 +323,39 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
     [AI_QID.riskExecute]: {
       type: "noul",
       instructions:
-        "Is the supplied market, portfolio and token-universe evidence coherent and fresh enough to evaluate a trade? Treat missing, stale, contradictory or ambiguous evidence as unsafe.",
+        "Is the supplied market, portfolio and token-universe evidence coherent and fresh enough to evaluate this candidate? Treat missing, stale, contradictory or ambiguous evidence as unsafe.",
       criteria: {
         true: "Evidence is coherent and fresh enough for a decision.",
         false: "Evidence is stale, incomplete, contradictory or unsafe to act on.",
       },
     },
   };
+
+  if (summary.allowedActions.includes("buy") || summary.allowedActions.includes("swap")) {
+    questions[AI_QID.sizeBucket] = {
+      type: "choice",
+      instructions:
+        "IF the candidate is accepted, choose the fraction of its deployable input balance to request. The deterministic governor may reduce it further.",
+      criteria: {
+        quarter: "25% — cautious clip.",
+        half: "50% — moderate clip.",
+        full: "100% — full deployable amount, still subject to deterministic limits.",
+      },
+    };
+  }
+  if (summary.allowedActions.includes("swap")) {
+    questions[AI_QID.swapTokenIn] = {
+      type: "choice",
+      instructions: "Choose the input token from state.candidatesIn. Never invent or rename a token.",
+      criteria: Object.fromEntries(summary.candidatesIn.map((t) => [t, "Spend " + t + "."])),
+    };
+    questions[AI_QID.swapTokenOut] = {
+      type: "choice",
+      instructions: "Choose the output token from state.candidatesOut. Never invent or rename a token.",
+      criteria: Object.fromEntries(summary.candidatesOut.map((t) => [t, "Receive " + t + "."])),
+    };
+  }
+  return questions;
 }
 
 /** Noul → confidence in whichever side it picked (0.5 = pure uncertainty). */
@@ -377,6 +405,8 @@ export function parseAiProposal(
   const actionAns = choiceOf(answers, AI_QID.action);
   if (!actionAns || !(AI_ACTIONS as string[]).includes(actionAns.choice)) return null;
   const action = actionAns.choice as AiAction;
+  if (context && !context.allowedActions.includes(action)) return null;
+  if (context && action !== "hold" && action !== context.candidateKind) return null;
 
   const execOk = noulOf(answers, AI_QID.riskExecute);
   const stress = noulOf(answers, AI_QID.riskStress);
@@ -395,7 +425,7 @@ export function parseAiProposal(
     if (execOk < 0.5) return null;
   }
   if (action === "buy" || action === "swap") {
-    // Acute stress vetoes entries and discretionary swaps; it never vetoes exits.
+    // Acute stress vetoes entries and discretionary swaps.
     if (stress > 0.5) return null;
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
@@ -438,6 +468,7 @@ export function parseAiProposal(
           snapshotFetchedAt: context.snapshotFetchedAt,
           requestedAt: context.requestedAt,
           model: context.model,
+          candidateKind: context.candidateKind,
         }
       : {}),
   };
@@ -454,7 +485,7 @@ export function isAiProposalFresh(
   now: number = Date.now(),
   maxAgeMs: number = AI_PROPOSAL_MAX_AGE_MS,
 ): boolean {
-  if (!proposal || !proposal.snapshotFetchedAt || !proposal.model) return false;
+  if (!proposal || !proposal.snapshotFetchedAt || !proposal.model || !proposal.candidateKind) return false;
   const sourceAt = Date.parse(proposal.snapshotFetchedAt);
   const currentAt = Date.parse(currentSnapshotFetchedAt);
   if (!Number.isFinite(sourceAt) || !Number.isFinite(currentAt)) return false;

@@ -119,7 +119,7 @@ function swapPrefill(
 const MODE_COPY: Record<AiControlMode, string> = {
   off: "Zero Jev calls leave this browser.",
   suggest: "Jev proposals are advisory — you apply them by hand.",
-  control: `Jev may execute proposals at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN} — through every risk gate.`,
+  control: `Jev may approve deterministic BUY candidates at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN} — through every risk gate.`,
 };
 
 export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {

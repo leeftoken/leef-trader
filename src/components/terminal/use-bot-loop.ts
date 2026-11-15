@@ -646,12 +646,12 @@ async function runBotOnceInner(
         : {};
   const candidateKey =
     decision.kind === "buy"
-      ? `buy:${b.quote || "WAX"}:${b.base || "LEEF"}:${decision.amountIn.toPrecision(10)}:${routeSignature(decision.route)}`
+      ? `${b.strategy}:buy:${b.quote || "WAX"}:${b.base || "LEEF"}`
       : decision.kind === "swap"
-        ? `swap:${decision.tokenIn}:${decision.tokenOut}:${decision.amountIn.toPrecision(10)}:${routeSignature(decision.route)}`
+        ? `${b.strategy}:swap:${decision.tokenIn}:${decision.tokenOut}`
         : "other";
-  // Jev judges the exact candidate the deterministic engine actually produced.
-  // It cannot invent a different trade type, amount, token pair, route, or create a trade from HOLD.
+  // Jev judges the existing strategy/token-pair candidate. It cannot invent
+  // another trade type or token pair; route selection remains engine-owned.
   maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
 
   b.setLastReason(decision.reason);
@@ -799,7 +799,7 @@ async function runBotOnceInner(
     const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
     const tag = `AI · Jev accepted ${fresh.candidateKind} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;
     if (fresh.action === "buy" && decision.kind === "buy") {
-      const probeIn = Math.min(bounds.maxIn, Math.max(bounds.minIn, bounds.maxIn * sizePct));
+      const probeIn = Math.min(bounds.maxIn, Math.max(bounds.minIn, decision.amountIn * sizePct));
       const route = bestExecutionRoute(book.pools, book.aux, probeIn, quoteTok, baseTok);
       if (!route) return aiHold("AI control: accepted buy candidate has no executable route on the refreshed book");
       decision = { kind: "buy", amountIn: probeIn, route, reason: tag, confidence: fresh.confidence };

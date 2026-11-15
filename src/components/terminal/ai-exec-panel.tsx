@@ -149,6 +149,20 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
     setMode(m);
   }
 
+  function selectHelperMode(m: AiControlMode) {
+    if (m === "control" && helperMode !== "control") {
+      setHelperConfirmOpen(true);
+      return;
+    }
+    const ok = setHelperMode(m);
+    if (!ok) {
+      toast({
+        title: "AI helper mode unavailable",
+        description: "Enable the AI helper and Jev SUGGEST or CONTROL before enabling helper review.",
+      });
+    }
+  }
+
   async function dryRun() {
     if (busy || mode === "off") return;
     setBusy(true);

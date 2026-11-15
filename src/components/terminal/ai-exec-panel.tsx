@@ -61,8 +61,7 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
   }
   const proposal = parseAiProposal(res.answers, {
     snapshotFetchedAt: summary.fetchedAt,
-    candidatesIn: summary.candidatesIn,
-    candidatesOut: summary.candidatesOut,
+    engineCandidateId: "advisory-dry-run",
     model: res.model,
     receivedAt: Date.now(),
   });

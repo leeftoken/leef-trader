@@ -168,9 +168,13 @@ export const useTerminal = create<TerminalState>()(
     set({ swapMaxHops: Math.min(10, Math.max(1, Math.round(n))), selectedRouteSig: null }),
   selectRoute: (selectedRouteSig) => set({ selectedRouteSig }),
   setAiEnabled: (aiEnabled) =>
+    // Disabling the helper must not silently downgrade combined CONTROL to
+    // Jev-only execution. Keep the selected helper mode, clear its approval,
+    // and let the deterministic trade seam pause entries until it is restored
+    // or the user explicitly changes helper mode.
     set(aiEnabled
       ? { aiEnabled: true }
-      : { aiEnabled: false, aiHelperControl: "off", aiHelperContext: null, aiHelperReview: null }),
+      : { aiEnabled: false, aiHelperReview: null }),
   setAiControl: (mode, confirmed) => {
     if (mode === "control" && get().aiControl !== "control" && confirmed !== true) {
       return false; // explicit risk-confirm required to grant control

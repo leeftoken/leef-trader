@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAlcorSlippageParam } from "./alcor-route";
+import { decimalsForAlcorId, formatAlcorSlippageParam } from "./alcor-route";
 
 /**
  * Alcor's getRoute handler:
@@ -54,5 +54,18 @@ describe("formatAlcorSlippageParam", () => {
     const s2 = formatAlcorSlippageParam(0.30000000000000004);
     expect(alcorAccepts(s2)).toBe(true);
     expect(Number(s2)).toBeLessThanOrEqual(0.3 + 1e-12);
+  });
+});
+
+describe("decimalsForAlcorId", () => {
+  it("uses catalog precision for known WAX token ids", () => {
+    expect(decimalsForAlcorId("wax-eosio.token")).toBe(8);
+    expect(decimalsForAlcorId("leef-leefmaincorp")).toBe(4);
+  });
+
+  it("fails closed rather than guessing unknown token precision", () => {
+    expect(() => decimalsForAlcorId("mystery-tokenacct")).toThrow(
+      "Missing authoritative precision for Alcor token mystery-tokenacct",
+    );
   });
 });

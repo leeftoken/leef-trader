@@ -24,7 +24,8 @@ function summary(): AiSnapshotSummary {
       { id: 217, pair: "LEEF/WAX", feePct: 0.3, tvlUsd: 900, volume24Usd: 6.6, change24: 1.2 },
     ],
     engineCandidate: {
-      id: "engine:buy:217:10.0000000000",
+      id: "engine:buy:2026-10-20T00:00:00.000Z:auto:WAX:LEEF:10.000000000000:alcor:217",
+      snapshotFetchedAt: "2026-10-20T00:00:00.000Z",
       tokenIn: "WAX",
       tokenOut: "LEEF",
       amountIn: 10,
@@ -89,7 +90,8 @@ describe("parseAiProposal", () => {
     expect(p!.proposalId).toContain("jev:");
     expect(p!.snapshotFetchedAt).toBe(summary().fetchedAt);
     expect(p!.model).toBe("jev-latest");
-    expect(p!.engineCandidateId).toBe("engine:buy:217:10.0000000000");
+    expect(p!.engineCandidateId).toBe(summary().engineCandidate!.id);
+    expect(p!.engineCandidateId).toContain(summary().fetchedAt);
     expect(p!.proposalId).toContain(p!.engineCandidateId);
   });
 

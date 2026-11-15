@@ -197,11 +197,11 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
           <div>
             <h2 className="text-lg font-semibold">AI trade control</h2>
             <p className="max-w-prose text-sm text-muted-foreground">
-              Jev (TypeSafe System One) proposes a trade; deterministic code retains final
-              authority. CONTROL requires Jev confidence ≥ {AI_EXEC_CONFIDENCE_MIN}. When the
-              strategic helper is also in CONTROL, it must separately approve each buy/swap.
-              Every trade still passes the existing freshness, sizing, quote, governor, resource,
-              policy and simulation gates before anything is signed.
+              Jev (TypeSafe System One) reviews the exact BUY candidate produced by our
+              deterministic engine. It can approve that candidate or choose HOLD, and can only
+              reduce its size. CONTROL requires confidence ≥ {AI_EXEC_CONFIDENCE_MIN}. With the
+              strategic helper also in CONTROL, both models must approve the same candidate.
+              The engine retains route and risk authority; the full execution gauntlet remains.
             </p>
           </div>
         </div>
@@ -243,7 +243,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">Strategic AI helper control</h3>
             <p className="text-xs text-muted-foreground mt-1">
-              In CONTROL, the helper is a independent model reviewer for Jev BUY proposals.
+              In CONTROL, the helper is an independent model reviewer for Jev BUY proposals.
               It can veto or abstain, but cannot invent trades, size positions, choose routes,
               sign, or block protective exits.
             </p>

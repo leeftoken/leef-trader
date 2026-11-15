@@ -53,13 +53,7 @@ import {
   type AiEngineCandidate,
 } from "@/lib/leef/ai-executor";
 import { askJev } from "@/lib/leef/jev-client";
-import { aiTask } from "@/lib/leef/ai-analyst";
-import {
-  buildAiHelperReviewPayload,
-  evaluateAiHelperReview,
-  helperReviewOfResult,
-  isAiProposalFresh,
-} from "@/lib/leef/ai-helper-control";
+import { evaluateAiHelperReview, isAiProposalFresh } from "@/lib/leef/ai-helper-control";
 import { refreshExecutionState } from "@/lib/market/execution-state";
 import { aggregateFlowRisk, swapFlow } from "@/lib/market/swap-flow";
 import { governTrade, portfolioState } from "@/lib/market/portfolio-governor";
@@ -212,42 +206,13 @@ function maybeKickAiPoll(
             receivedAt,
           })
         : null;
-      const terminal = useTerminal.getState();
-      terminal.setAiProposal(proposal);
-      terminal.setAiHelperReview(null);
-
-      if (
-        !proposal ||
-        proposal.action !== "buy" ||
-        terminal.aiHelperControl === "off" ||
-        !terminal.aiEnabled
-      ) return;
-
-      try {
-        const reviewData = buildAiHelperReviewPayload(
-          proposal,
-          summary as unknown as Record<string, unknown>,
-          deterministic,
-        );
-        const helper = await aiTask("opportunity_explanation", reviewData, {
-          url: terminal.aiGatewayUrl,
-          timeoutMs: 12_000,
-        });
-        const review = helperReviewOfResult(helper, proposal, Date.now());
-        const current = useTerminal.getState();
-        if (current.aiHelperControl !== "off") current.setAiHelperReview(review);
-        journal({
-          kind: "ai",
-          reason: review
-            ? `AI helper ${review.decision} Jev ${proposal.action} · confidence ${review.confidence.toFixed(2)} · ${review.reason.slice(0, 160)}`
-            : `AI helper review unusable for Jev ${proposal.action} · no candidate-bound approval`,
-          latencyMs: helper.latencyMs,
-        });
-      } catch (err) {
-        useTerminal.getState().setAiHelperReview(null);
-        const reason = err instanceof Error ? err.message.slice(0, 160) : "helper unavailable";
-        journal({ kind: "ai", reason: `AI helper review unavailable · ${reason}` });
-      }
+      // The bot loop only publishes the Jev proposal and compact review
+      // context. The UI-layer supervisor owns all strategic helper API calls;
+      // this keeps the trading path independent of the general AI client.
+      useTerminal.getState().setAiProposal(
+        proposal,
+        proposal ? { market: summary, deterministic } : null,
+      );
     } finally {
       aiPollInFlight = false;
     }

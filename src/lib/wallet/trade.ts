@@ -17,14 +17,17 @@ import { balanceForIdentifier } from "./balances";
 import { parseAssetAmount, type AlcorRouteQuote } from "./alcor-route";
 import { fetchAlcorRouteCached } from "@/lib/leef/quote-verify";
 import { useWallet } from "@/store/wallet";
+import { markUnknown } from "./trade-cycle";
 
 export type SwapOutcome = {
   mode: "paper" | "live";
   amountOut: number;
   routeLabel: string;
   txid?: string;
-  /** Live only: whether the chain confirmed the fill (else quoted estimate). */
+  /** Live only: whether exact input/output transfer deltas were reconciled. */
   confirmed?: boolean;
+  /** Present when a landed transaction's transfers do not match the requested token pair. */
+  settlementIssue?: string;
 };
 
 /**
@@ -255,6 +258,8 @@ export async function executeSwap(opts: {
           `This split expands to ${legs.length} on-chain actions — over the per-transaction CPU budget (max ${MAX_MANUAL_SWAP_ACTIONS}). Pin a simpler route above or use a smaller size.`,
         );
       }
+      const inMeta = metaOf(opts.tokenIn, book);
+      const outMeta = metaOf(opts.tokenOut, book);
       const coordinated = await coordinateCapitalMovement({
         owner: "manual",
         submit: () =>
@@ -264,30 +269,47 @@ export async function executeSwap(opts: {
             legs,
             snap: book,
           }),
+        onSettled: (settled) => {
+          if (settled.status !== "confirmed") return;
+          const spent = assetDelta(settled.transfers, w.account, inMeta.symbol, inMeta.contract);
+          const received = assetDelta(settled.transfers, w.account, outMeta.symbol, outMeta.contract);
+          if (!(spent < 0 && received > 0)) markUnknown(settled.txid);
+        },
       });
       const { txid, reconciliation: rec } = coordinated;
       if (rec.status === "failed") throw new Error(rec.error);
-      let amountOut = expectedOut;
+      let amountOut = 0;
+      let confirmed = false;
+      let settlementIssue: string | undefined;
       if (rec.status === "confirmed") {
-        const outMeta = metaOf(opts.tokenOut, book);
+        const spent = assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
         const actual = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
-        if (actual > 0) amountOut = actual;
+        if (spent < 0 && actual > 0) {
+          amountOut = actual;
+          confirmed = true;
+        } else {
+          settlementIssue = "The transaction is on-chain, but its transfers do not show the requested input debit and output credit. Capital remains locked for review.";
+          markUnknown(txid);
+        }
       }
       journal({
         kind: "execution", action: "swap", strategy: "manual", mode: "live",
         tokenIn: opts.tokenIn, tokenOut: opts.tokenOut, amountIn: opts.amountIn,
-        expectedOut, actualOut: amountOut, txid,
-        status: rec.status === "confirmed" ? "confirmed" : "unknown",
+        expectedOut, actualOut: confirmed ? amountOut : undefined, txid,
+        status: confirmed ? "confirmed" : "unknown",
         leefUsd: book.leefUsd, waxUsd: book.waxUsd,
       });
       return {
         mode: "live",
-        amountOut,
+        amountOut: confirmed ? amountOut : expectedOut,
         routeLabel: route.label,
         txid,
-        confirmed: rec.status === "confirmed",
+        confirmed,
+        settlementIssue,
       };
     }
+    const inMeta = metaOf(opts.tokenIn, book);
+    const outMeta = metaOf(opts.tokenOut, book);
     const coordinated = await coordinateCapitalMovement({
       owner: "manual",
       submit: () =>
@@ -301,31 +323,46 @@ export async function executeSwap(opts: {
           // A cycle signs the venue-verified memos, not a blind re-quote.
           preQuoted,
         }),
+      onSettled: (settled) => {
+        if (settled.status !== "confirmed") return;
+        const spent = assetDelta(settled.transfers, w.account, inMeta.symbol, inMeta.contract);
+        const received = assetDelta(settled.transfers, w.account, outMeta.symbol, outMeta.contract);
+        if (!(spent < 0 && received > 0)) markUnknown(settled.txid);
+      },
     });
     const exec = coordinated.value;
     // Reconcile against the chain: actual transfers are truth. UNKNOWN stays
     // globally locked and is never retried blindly.
     const rec = coordinated.reconciliation;
     if (rec.status === "failed") throw new Error(rec.error);
-    let amountOut = exec.expectedOut;
+    let amountOut = 0;
+    let confirmed = false;
+    let settlementIssue: string | undefined;
     if (rec.status === "confirmed") {
-        const outMeta = metaOf(opts.tokenOut, book);
+      const spent = assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
       const actual = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
-      if (actual > 0) amountOut = actual;
+      if (spent < 0 && actual > 0) {
+        amountOut = actual;
+        confirmed = true;
+      } else {
+        settlementIssue = "The transaction is on-chain, but its transfers do not show the requested input debit and output credit. Capital remains locked for review.";
+        markUnknown(exec.txid);
+      }
     }
     journal({
       kind: "execution", action: "swap", strategy: "manual", mode: "live",
       tokenIn: opts.tokenIn, tokenOut: opts.tokenOut, amountIn: opts.amountIn,
-      expectedOut: exec.expectedOut, actualOut: amountOut, txid: exec.txid,
-      status: rec.status === "confirmed" ? "confirmed" : "unknown",
+      expectedOut: exec.expectedOut, actualOut: confirmed ? amountOut : undefined, txid: exec.txid,
+      status: confirmed ? "confirmed" : "unknown",
       leefUsd: book.leefUsd, waxUsd: book.waxUsd,
     });
     return {
       mode: "live",
-      amountOut,
+      amountOut: confirmed ? amountOut : exec.expectedOut,
       routeLabel: route.label,
       txid: exec.txid,
-      confirmed: rec.status === "confirmed",
+      confirmed,
+      settlementIssue,
     };
   }
 

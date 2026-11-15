@@ -1,7 +1,7 @@
 import { marketStats } from "@/lib/leef/analytics";
 import { fmtLeefLot, fmtNum, fmtUsd } from "@/lib/leef/format";
 import { headline } from "@/lib/leef/rank";
-import type { LeefSnapshot, RankedPool } from "@/lib/leef/types";
+import { snapFreshAtMs, type LeefSnapshot, type RankedPool } from "@/lib/leef/types";
 import type { LiveTickState } from "./use-live-tick";
 import { useMarketEngine } from "@/hooks/useMarketEngine";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,18 @@ export function StatusBar({
   const h = headline(ranked);
   const stats = marketStats(snap);
   const synced = relTime(snap.fetchedAt, now);
+  const snapshotAgeSec = Math.max(0, (now - snapFreshAtMs(snap)) / 1000);
+  const snapshotFresh = Number.isFinite(snapshotAgeSec) && snapshotAgeSec <= 45;
+  const marketDataState =
+    snap.source === "unavailable"
+      ? "NO DATA"
+      : snap.source !== "live"
+        ? "FALLBACK"
+        : snapshotFresh
+          ? "LIVE"
+          : "STALE";
+  const marketDataTone =
+    marketDataState === "LIVE" ? "text-leef" : "text-warn";
   const blockAgeSec =
     engine.headBlockAt > 0 ? Math.max(0, (now - engine.headBlockAt) / 1000) : null;
   const blockFresh = blockAgeSec != null && blockAgeSec < 5;
@@ -48,13 +60,12 @@ export function StatusBar({
       <VersionBanner />
       <div className="mx-auto flex max-w-[1440px] flex-col gap-2 px-4 py-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="relative flex size-2">
-            <span
-              className={`absolute inline-flex h-full w-full rounded-full opacity-70 ${snap.source === "live" ? "animate-ping bg-leef" : "bg-warn"}`}
-            />
-            <span
-              className={`relative inline-flex size-2 rounded-full ${snap.source === "live" ? "bg-leef" : "bg-warn"}`}
-            />
+          <span
+            className={cn("font-semibold tracking-wide", marketDataTone)}
+            title={`Market source: ${snap.source}; freshest snapshot age: ${Number.isFinite(snapshotAgeSec) ? snapshotAgeSec.toFixed(1) + "s" : "unknown"}; bot quote freshness limit: 45s`}
+          >
+            {marketDataState}
+            {Number.isFinite(snapshotAgeSec) && <span className="ml-1 font-normal text-muted-foreground">{snapshotAgeSec.toFixed(0)}s</span>}
           </span>
           <span>
             TVL{" "}

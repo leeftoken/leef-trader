@@ -336,11 +336,20 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
         // Self-impact follow-up entries are observations, not new executions.
         if (e.amountIn == null && e.expectedOut == null && e.selfImpactPct != null) break;
         s.executions += 1;
-        if (e.status === "confirmed" || e.status === "included") s.confirmed += 1;
-        if (e.status === "unknown") s.unknown += 1;
-        if (e.status === "paper") s.paper += 1;
-        if ((e.pnlUsd ?? 0) > 0) s.wins += 1;
-        s.pnlUsd += e.pnlUsd ?? 0;
+        // Only transfer-reconciled LIVE fills and modeled PAPER fills have a
+        // settled outcome. RPC inclusion alone is not a fill; UNKNOWN/INCLUDED
+        // rows must never contribute estimated router P&L or win counts.
+        if (e.status === "confirmed") {
+          s.confirmed += 1;
+          if ((e.pnlUsd ?? 0) > 0) s.wins += 1;
+          s.pnlUsd += e.pnlUsd ?? 0;
+        } else if (e.status === "paper") {
+          s.paper += 1;
+          if ((e.pnlUsd ?? 0) > 0) s.wins += 1;
+          s.pnlUsd += e.pnlUsd ?? 0;
+        } else if (e.status === "unknown" || e.status === "included") {
+          s.unknown += 1;
+        }
         break;
       case "calibration":
         if (e.predEdgePct != null) {

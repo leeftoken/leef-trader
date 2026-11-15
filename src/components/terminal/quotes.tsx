@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useTerminal } from "@/store/terminal";
 import { PairMarks, TokenMark } from "./token-mark";
 import { TokenRiskNotice } from "./token-risk-notice";
+import { metaOf, tokenCatalog } from "@/lib/wallet/tokens";
 
 const PRESETS = [1, 10, 50, 100];
 
@@ -42,14 +43,23 @@ export function Quotes({
   const selectRoute = useTerminal((s) => s.selectRoute);
   const head = headline(ranked);
 
-  // Any liquid universe token is tradeable here — not just LEEF pairs.
+  // Keep token selection contract-aware. A ticker shared by multiple WAX
+  // contracts is presented as SYMBOL@CONTRACT and remains exact through route
+  // discovery, quote verification, signing and post-trade reconciliation.
   const tokens = useMemo(() => {
-    const set = new Set(pairTokens(snap.pools, [tokenIn, tokenOut]));
+    const symbols = new Set(
+      pairTokens(snap.pools, [tokenSymbol(tokenIn), tokenSymbol(tokenOut)]),
+    );
     for (const u of snap.universe) {
-      if (u.usdPrice > 0 && u.tvlUsd >= 15 && !u.alcorScam) set.add(u.symbol.toUpperCase());
+      if (u.usdPrice > 0 && u.tvlUsd >= 15 && !u.alcorScam) symbols.add(u.symbol.toUpperCase());
     }
-    return [...set];
-  }, [snap.pools, snap.universe, tokenIn, tokenOut]);
+    const catalog = tokenCatalog(snap).filter((t) => symbols.has(t.symbol));
+    const counts = new Map<string, number>();
+    for (const token of catalog) counts.set(token.symbol, (counts.get(token.symbol) ?? 0) + 1);
+    return catalog
+      .map((t) => (counts.get(t.symbol)! > 1 ? `${t.symbol}@${t.contract}` : t.symbol))
+      .sort((a, b) => a.localeCompare(b));
+  }, [snap, tokenIn, tokenOut]);
   const amount = Number(amountIn) || 0;
 
   const routes = useMemo(
@@ -270,8 +280,12 @@ export function Quotes({
                   label="Platform fee"
                   value={(() => {
                     const meta = snap.universe.find(
-                      (u) => u.symbol === tokenOut.toUpperCase(),
-                    );
+                      (u) =>
+                        u.symbol === tokenSymbol(tokenOut) &&
+                        (!tokenOut.includes("@") || u.contract === tokenOut.split("@")[1]),
+                    ) ?? (() => {
+                      try { return metaOf(tokenOut, snap); } catch { return null; }
+                    })();
                     const fee = platformFeeOn(
                       active.amountOut * (1 - slippage / 100),
                       meta ?? { symbol: tokenOut, contract: "", decimals: 4 },
@@ -300,8 +314,11 @@ export function Quotes({
 
             {active && (
               <TokenRiskNotice
-                tokens={[tokenIn, tokenOut].map((s) =>
-                  snap.universe.find((u) => u.symbol === s.toUpperCase()),
+                tokens={[tokenIn, tokenOut].map((identifier) =>
+                  snap.universe.find((u) =>
+                    u.symbol === tokenSymbol(identifier) &&
+                    (!identifier.includes("@") || u.contract === identifier.split("@")[1]),
+                  ),
                 )}
               />
             )}
@@ -599,6 +616,10 @@ function RouteRow({
   );
 }
 
+function tokenSymbol(identifier: string): string {
+  return identifier.split("@", 1)[0]!.toUpperCase();
+}
+
 function TokenSelect({
   value,
   tokens,
@@ -608,19 +629,27 @@ function TokenSelect({
   tokens: string[];
   onChange: (v: string) => void;
 }) {
+  const selected = tokens.includes(value) ? value : "";
   return (
     <label className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2 py-1.5">
-      <TokenMark symbol={value} size="sm" />
+      <TokenMark symbol={tokenSymbol(value)} size="sm" />
       <select
-        value={value}
+        value={selected}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 bg-transparent text-sm font-medium text-fg focus:outline-none"
+        className="h-8 max-w-36 bg-transparent text-sm font-medium text-fg focus:outline-none"
+        aria-label="Token contract"
       >
-        {tokens.map((t) => (
-          <option key={t} value={t} className="bg-surface text-fg">
-            {t}
-          </option>
-        ))}
+        <option value="" disabled className="bg-surface text-muted-foreground">
+          Choose token
+        </option>
+        {tokens.map((t) => {
+          const [symbol, ...contract] = t.split("@");
+          return (
+            <option key={t} value={t} className="bg-surface text-fg">
+              {contract.length ? `${symbol} · ${contract.join("@")}` : symbol}
+            </option>
+          );
+        })}
       </select>
     </label>
   );

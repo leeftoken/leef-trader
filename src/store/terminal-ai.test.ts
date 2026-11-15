@@ -61,10 +61,23 @@ describe("aiHelperControl (strategic second-key review)", () => {
     expect(useTerminal.getState().setAiHelperControl("control", true)).toBe(true);
     expect(useTerminal.getState().aiHelperControl).toBe("control");
 
+    useTerminal.getState().setAiHelperReview({
+      candidateId: "jev:sample",
+      snapshotFetchedAt: "2026-11-15T11:59:00.000Z",
+      decision: "approve",
+      confidence: 0.9,
+      riskFlags: [],
+      reason: "test",
+      reviewedAt: Date.now(),
+      model: "test",
+    });
     useTerminal.getState().setAiEnabled(false);
-    expect(useTerminal.getState().aiHelperControl).toBe("off");
+    // Disabling the helper must not silently downgrade to Jev-only CONTROL.
+    expect(useTerminal.getState().aiHelperControl).toBe("control");
     expect(useTerminal.getState().aiHelperReview).toBeNull();
+    expect(useTerminal.getState().aiEnabled).toBe(false);
     useTerminal.getState().setAiEnabled(true);
+    expect(useTerminal.getState().aiHelperControl).toBe("control");
     useTerminal.getState().setAiControl("off");
   });
 

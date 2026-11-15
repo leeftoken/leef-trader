@@ -465,7 +465,14 @@ export function parseAiProposal(
   if (action === "swap") {
     // The token pair belongs to the deterministic candidate, never to Jev.
     const candidate = context?.candidate;
-    if (!candidate?.tokenIn || !candidate.tokenOut || candidate.tokenIn === candidate.tokenOut) return null;
+    if (
+      !candidate?.tokenIn ||
+      !candidate.tokenInContract ||
+      !candidate.tokenOut ||
+      !candidate.tokenOutContract ||
+      candidate.tokenIn === candidate.tokenOut ||
+      candidate.tokenInContract === candidate.tokenOutContract
+    ) return null;
     params.tokenIn = candidate.tokenIn;
     params.tokenOut = candidate.tokenOut;
     rationale.push(candidate.tokenIn + "→" + candidate.tokenOut);

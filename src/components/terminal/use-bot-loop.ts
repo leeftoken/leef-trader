@@ -106,15 +106,18 @@ function maybeKickAiPoll(
   balances: Record<string, number>,
   mode: "paper" | "live",
   candidateKind: AiCandidateKind,
+  candidateKey: string,
 ): void {
   if (import.meta.env.MODE === "test") return;
-  if (useTerminal.getState().aiControl === "off") return;
+  const aiMode = useTerminal.getState().aiControl;
+  if (aiMode === "off") return;
+  if (aiMode === "control" && candidateKind === "other") return;
   if (snap.source !== "live") return;
   const now = Date.now();
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
-  const summary = aiSummaryOf(snap, b, balances, candidateKind);
+  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey);
   const requestedAt = Date.now();
   void (async () => {
     try {
@@ -127,6 +130,7 @@ function maybeKickAiPoll(
             receivedAt,
             model: res.model,
             candidateKind: summary.candidateKind,
+            candidateKey: summary.candidateKey,
             allowedActions: summary.allowedActions,
             candidatesIn: summary.candidatesIn,
             candidatesOut: summary.candidatesOut,
@@ -614,9 +618,15 @@ async function runBotOnceInner(
 
   const candidateKind: AiCandidateKind =
     decision.kind === "buy" ? "buy" : decision.kind === "swap" ? "swap" : "other";
-  // Jev judges the candidate the deterministic engine actually produced.
-  // It cannot invent a different trade type or create a trade from HOLD.
-  maybeKickAiPoll(snap, b, balances, mode, candidateKind);
+  const candidateKey =
+    decision.kind === "buy"
+      ? `buy:${b.quote || "WAX"}:${b.base || "LEEF"}:${routeSignature(decision.route)}`
+      : decision.kind === "swap"
+        ? `swap:${decision.tokenIn}:${decision.tokenOut}:${routeSignature(decision.route)}`
+        : "other";
+  // Jev judges the exact candidate the deterministic engine actually produced.
+  // It cannot invent a different trade type, substitute a route, or create a trade from HOLD.
+  maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey);
 
   b.setLastReason(decision.reason);
 
@@ -728,7 +738,8 @@ async function runBotOnceInner(
         cycleT0,
         AI_PROPOSAL_MAX_AGE_MS,
       ) &&
-      p?.candidateKind === decision.kind
+      p?.candidateKind === decision.kind &&
+      p?.candidateKey === candidateKey
         ? p
         : null;
     const aiHold = (reason: string): Decision => {

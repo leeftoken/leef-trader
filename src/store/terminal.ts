@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { DEFAULT_AI_GATEWAY } from "@/lib/leef/ai-analyst";
 import type { AiProposal } from "@/lib/leef/ai-executor";
-import type { AiHelperReview } from "@/lib/leef/ai-helper-control";
+import type { AiHelperReview, AiHelperReviewContext } from "@/lib/leef/ai-helper-control";
 import { setLearningModeProvider } from "@/lib/leef/learning-store";
 
 /** Book-pull cadence. Live = 10s — fastest that stays polite to Alcor. */
@@ -60,6 +60,8 @@ type TerminalState = {
   aiHelperControl: "off" | "suggest" | "control";
   /** Latest Jev proposal for the AI desk (ephemeral — never persisted). */
   aiProposal: AiProposal | null;
+  /** Snapshot context for the UI-layer helper supervisor (ephemeral). */
+  aiHelperContext: AiHelperReviewContext | null;
   /** Candidate-bound strategic helper review (ephemeral — never persisted). */
   aiHelperReview: AiHelperReview | null;
   /**
@@ -108,7 +110,7 @@ type TerminalState = {
    */
   setAiControl: (mode: "off" | "suggest" | "control", confirmed?: boolean) => boolean;
   setAiHelperControl: (mode: "off" | "suggest" | "control", confirmed?: boolean) => boolean;
-  setAiProposal: (p: AiProposal | null) => void;
+  setAiProposal: (p: AiProposal | null, context?: AiHelperReviewContext | null) => void;
   setAiHelperReview: (review: AiHelperReview | null) => void;
   setFlowGuardEnabled: (on: boolean) => void;
   setLearningMode: (mode: "suggest" | "controlled") => void;
@@ -137,6 +139,7 @@ export const useTerminal = create<TerminalState>()(
   aiControl: "off",
   aiHelperControl: "off",
   aiProposal: null,
+  aiHelperContext: null,
   aiHelperReview: null,
   flowGuardEnabled: true,
   learningMode: "suggest",
@@ -167,7 +170,7 @@ export const useTerminal = create<TerminalState>()(
   setAiEnabled: (aiEnabled) =>
     set(aiEnabled
       ? { aiEnabled: true }
-      : { aiEnabled: false, aiHelperControl: "off", aiHelperReview: null }),
+      : { aiEnabled: false, aiHelperControl: "off", aiHelperContext: null, aiHelperReview: null }),
   setAiControl: (mode, confirmed) => {
     if (mode === "control" && get().aiControl !== "control" && confirmed !== true) {
       return false; // explicit risk-confirm required to grant control
@@ -182,6 +185,7 @@ export const useTerminal = create<TerminalState>()(
     set({
       aiControl: mode,
       aiProposal: mode === state.aiControl ? state.aiProposal : null,
+      aiHelperContext: mode === state.aiControl ? state.aiHelperContext : null,
       aiHelperControl: helperMode,
       aiHelperReview: null,
     });
@@ -201,7 +205,8 @@ export const useTerminal = create<TerminalState>()(
     set({ aiHelperControl: mode, aiHelperReview: null });
     return true;
   },
-  setAiProposal: (aiProposal) => set({ aiProposal }),
+  setAiProposal: (aiProposal, aiHelperContext = null) =>
+    set({ aiProposal, aiHelperContext: aiProposal ? aiHelperContext : null, aiHelperReview: null }),
   setAiHelperReview: (aiHelperReview) => set({ aiHelperReview }),
   setFlowGuardEnabled: (flowGuardEnabled) => set({ flowGuardEnabled }),
   setLearningMode: (learningMode) => set({ learningMode }),

@@ -36,16 +36,16 @@ export function MobileNav({ poolCount }: { poolCount: number }) {
   const tab = useTerminal((s) => s.tab);
   const setTab = useTerminal((s) => s.setTab);
   const [open, setOpen] = useState(false);
-  const primary: TabId[] = ["overview", "tick", "bot", "wallet"];
+  const primary: TabId[] = ["overview", "quotes", "bot", "wallet"];
   const more = TABS.filter((t) => !primary.includes(t.id));
 
   return (
     <>
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-bg/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-surface/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-12px_36px_-24px_rgb(0_0_0/0.9)] backdrop-blur-2xl md:hidden"
         aria-label="Primary"
       >
-        <div className="grid grid-cols-5 px-2 py-1.5">
+        <div className="mx-auto grid max-w-lg grid-cols-5 gap-1 px-2 py-1.5">
           {primary.map((id) => {
             const t = TABS.find((x) => x.id === id)!;
             const Icon = t.icon;
@@ -76,9 +76,11 @@ export function MobileNav({ poolCount }: { poolCount: number }) {
           <button
             type="button"
             onClick={() => setOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={open}
             className={cn(
-              "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition-colors",
-              more.some((t) => t.id === tab) ? "text-leef" : "text-muted-foreground",
+              "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-leef/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
+              more.some((t) => t.id === tab) ? "bg-leef/[0.06] text-leef" : "text-muted-foreground hover:bg-surface-2/70 hover:text-fg",
             )}
           >
             <span

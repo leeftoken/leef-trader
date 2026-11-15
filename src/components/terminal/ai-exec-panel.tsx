@@ -86,8 +86,8 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
 
 /**
  * Derive a Swap-desk prefill from a proposal plus live bot/wallet state.
- * Proposals carry no amountIn (and buy/sell carry no token params), so the
- * amounts come from the same state the control seam would use. Returns null
+ * Proposals carry the engine candidate's input amount and (for swaps) its
+ * exact token pair. Prefills are capped by current balances. Returns null
  * when a coherent prefill can't be derived — the caller hides the button.
  */
 function swapPrefill(
@@ -99,14 +99,14 @@ function swapPrefill(
   const balances = useWallet.getState().balances();
   const sizePct = Math.min(100, Math.max(1, Number(p.params.sizePct ?? "100"))) / 100;
   if (p.action === "buy") {
-    const amount = (p.candidate?.amountIn ?? balances[quote] ?? 0) * sizePct;
+    const amount = Math.min(p.candidate?.amountIn ?? balances[quote] ?? 0, balances[quote] ?? 0) * sizePct;
     return amount > 0 ? { tokenIn: quote, tokenOut: base, amountIn: String(amount) } : null;
   }
   if (p.action === "swap") {
     const tokenIn = p.params.tokenIn;
     const tokenOut = p.params.tokenOut;
     if (!tokenIn || !tokenOut || tokenIn === tokenOut) return null;
-    const amountIn = (p.candidate?.amountIn ?? balances[tokenIn] ?? 0) * sizePct;
+    const amountIn = Math.min(p.candidate?.amountIn ?? balances[tokenIn] ?? 0, balances[tokenIn] ?? 0) * sizePct;
     return amountIn > 0 ? { tokenIn, tokenOut, amountIn: String(amountIn) } : null;
   }
   return null;

@@ -698,8 +698,17 @@ async function runBotOnceInner(
   // still pass — the AI can never suppress a risk exit.
   if (useTerminal.getState().aiControl === "control" && decision.kind !== "sell") {
     const p = useTerminal.getState().aiProposal;
+    const currentSnapshotAt = snapFreshAtMs(snap);
     const fresh: AiProposal | null =
-      isAiProposalFresh(p, snap.fetchedAt, cycleT0, AI_PROPOSAL_MAX_AGE_MS) ? p! : null;
+      Number.isFinite(currentSnapshotAt) &&
+      isAiProposalFresh(
+        p,
+        new Date(currentSnapshotAt).toISOString(),
+        cycleT0,
+        AI_PROPOSAL_MAX_AGE_MS,
+      )
+        ? p!
+        : null;
     const aiHold = (reason: string): Decision => {
       b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
       b.setLastReason(reason);

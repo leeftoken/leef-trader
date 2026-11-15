@@ -2,7 +2,7 @@
 
 ## Authority model
 
-The trading engine remains the source of executable decisions and the final authority. Jev supplies a structured, fast decision proposal. The larger AI helper supplies a separate strategic review of that exact proposal. Neither model can sign, submit transactions, change permissions, select wallet keys, set risk limits, or bypass execution checks.
+The trading engine remains the source of executable decisions and the final authority. The deterministic engine first creates an eligible BUY candidate. Jev supplies a structured, fast approve-or-HOLD judgement for that exact candidate. The larger AI helper supplies a separate strategic review of that exact Jev proposal. Neither model can sign, submit transactions, change permissions, select wallet keys, set risk limits, or bypass execution checks.
 
 There are two independent persisted controls:
 
@@ -16,7 +16,7 @@ AI helper modes are OFF, SUGGEST, and CONTROL:
 
 ## Dual CONTROL decision policy
 
-For Jev BUY proposals, all of the following must be true:
+For a deterministic engine BUY candidate in combined CONTROL, all of the following must be true:
 
 1. Jev returns a valid typed proposal and its weakest relevant judgment meets the existing 0.75 confidence floor.
 2. The proposal is bound to a valid source snapshot and is neither stale nor future-dated.
@@ -29,11 +29,11 @@ A missing response, timeout, malformed schema, candidate mismatch, stale/future 
 
 Protective engine exits and Jev SELL/REDUCE_RISK actions are not subject to the helper approval gate. The helper cannot delay or veto risk-reducing exits. The standard sell, stop, sizing, route, portfolio, resource, policy, simulation, signing, and reconciliation protections remain in force.
 
-The engine's existing HOLD path remains conservative: Jev cannot manufacture an entry when the deterministic engine has already returned a HOLD or STOP. The AI control seam only runs on cycles that pass the engine's earlier deterministic decision checks.
+The engine's existing HOLD path remains conservative: Jev cannot manufacture an entry when the deterministic engine has already returned a HOLD or STOP. Jev also cannot replace a SELL, STOP, ARB, or SWAP decision. The AI control seam only runs on deterministic BUY candidates that pass the engine's earlier eligibility checks.
 
 ## Gateway contract — release gate
 
-The app sends the helper an `opportunity_explanation` task whose data includes a `control_review_request` and explicit response schema. The app accepts only:
+Jev is only asked to choose BUY or HOLD for a deterministic engine BUY candidate; it cannot choose exits, swaps, token pairs, routes, or new amounts. It may only reduce the candidate's proposed amount. The app sends the helper an `opportunity_explanation` task whose data includes a `control_review_request` and explicit response schema. The app accepts only:
 
 ```json
 {

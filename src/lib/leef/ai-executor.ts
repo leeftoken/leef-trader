@@ -29,6 +29,8 @@ export interface AiProposal {
   requestedAt?: number;
   /** Model identifier returned by TypeSafe, retained for auditability. */
   model?: string;
+  /** Deterministic candidate this judgement was restricted to. */
+  candidateKind?: AiCandidateKind;
 }
 
 export interface AiProposalContext {

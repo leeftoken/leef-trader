@@ -102,6 +102,7 @@ let aiLastPollAt = 0;
 function helperDeterministicContext(
   snap: LeefSnapshot,
   b: ReturnType<typeof useBot.getState>,
+  flowRisk: ReturnType<typeof aggregateFlowRisk>,
 ): Record<string, unknown> {
   const regime = classifyRegime({
     series: b.series,
@@ -126,6 +127,13 @@ function helperDeterministicContext(
     dangerBand: danger.band,
     deterministicEntrySizeFactor: danger.sizeFactor,
     deterministicRiskReasons: [...regime.explain, ...danger.explain].slice(0, 8),
+    observedSwapFlowRisk: flowRisk
+      ? {
+          lastSwapAgeMs: flowRisk.lastSwapAgeMs,
+          lastMovePct: flowRisk.lastMovePct,
+          imbalancePct: flowRisk.imbalancePct,
+        }
+      : null,
     strategy: b.strategy,
     configuredPair: { base: b.base, quote: b.quote },
     position: b.position
@@ -199,6 +207,7 @@ function maybeKickAiPoll(
   b: ReturnType<typeof useBot.getState>,
   balances: Record<string, number>,
   engineCandidate: AiEngineCandidate,
+  flowRisk: ReturnType<typeof aggregateFlowRisk>,
 ): void {
   const initial = useTerminal.getState();
   if (import.meta.env.MODE === "test") return;
@@ -208,7 +217,7 @@ function maybeKickAiPoll(
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
-  const deterministic = helperDeterministicContext(snap, b);
+  const deterministic = helperDeterministicContext(snap, b, flowRisk);
   const summary = {
     ...aiSummaryOf(snap, b, balances),
     engineCandidate,
@@ -689,7 +698,16 @@ async function runBotOnceInner(
   // Only ask Jev to assess a deterministic engine BUY candidate. No polling
   // on HOLD/STOP/SELL/ARB/SWAP paths; the AI cannot create or replace them.
   if (!opts?.dry && decision.kind === "buy") {
-    maybeKickAiPoll(snap, b, balances, aiEngineCandidateOf(decision, b, snap.fetchedAt));
+    const flowRisk = flowStates
+      ? aggregateFlowRisk(flowStates, risk.maxQuoteAgeSec * 1_000)
+      : null;
+    maybeKickAiPoll(
+      snap,
+      b,
+      balances,
+      aiEngineCandidateOf(decision, b, snap.fetchedAt),
+      flowRisk,
+    );
   }
 
   b.setLastReason(decision.reason);

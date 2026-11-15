@@ -45,6 +45,9 @@ function summary(): AiSnapshotSummary {
       { symbol: "LEEF", contract: "leefmaincorp" },
       { symbol: "WAX", contract: "eosio.token" },
     ],
+    candidateKind: "preview",
+    candidateKey: "dry-run",
+    allowedActions: ["hold", "buy", "swap"],
     candidatesIn: ["WAX", "LEEF"],
     candidatesOut: ["LEEF", "WAX", "WAXUSDC"],
   };
@@ -67,22 +70,39 @@ const context: AiProposalContext = {
   requestedAt: 100_000,
   receivedAt: 105_000,
   model: "jev-latest",
+  candidateKind: "buy",
+  candidateKey: "buy:WAX:LEEF:direct:217",
+  allowedActions: ["hold", "buy"],
   candidatesIn: ["WAX", "LEEF"],
   candidatesOut: ["LEEF", "WAX", "WAXUSDC"],
 };
+const swapContext: AiProposalContext = {
+  ...context,
+  candidateKind: "swap",
+  candidateKey: "swap:WAX:LEEF:direct:217",
+  allowedActions: ["hold", "swap"],
+};
 
 describe("buildAiQuestions", () => {
-  it("offers only actions this execution loop actually supports", () => {
+  it("offers only the action types allowed for the exact deterministic candidate", () => {
     const q = buildAiQuestions(summary());
-    expect(q[AI_QID.action]?.type).toBe("choice");
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "buy", "sell", "swap", "reduce_risk"]);
+    expect(Object.keys(criteria)).toEqual(["hold", "buy", "swap"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
     expect(q[AI_QID.swapTokenIn]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
     expect(q[AI_QID.riskExecute]?.type).toBe("noul");
     const tin = (q[AI_QID.swapTokenIn] as { criteria: Record<string, unknown> }).criteria;
     expect(Object.keys(tin)).toEqual(["WAX", "LEEF"]);
+  });
+
+  it("does not offer swap arguments or unrelated actions for a buy candidate", () => {
+    const s = { ...summary(), candidateKind: "buy" as const, allowedActions: ["hold", "buy"] as const };
+    const q = buildAiQuestions(s);
+    const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
+    expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
+    expect(q[AI_QID.swapTokenIn]).toBeUndefined();
+    expect(q[AI_QID.swapTokenOut]).toBeUndefined();
   });
 
   it("includes engine-owned market regime, danger, portfolio and contract context", () => {
@@ -95,7 +115,7 @@ describe("buildAiQuestions", () => {
 });
 
 describe("parseAiProposal", () => {
-  it("parses a buy proposal; confidence is the weakest relevant judgment", () => {
+  it("parses a buy judgement for the matching engine candidate", () => {
     const p = parseAiProposal(answers(), context);
     expect(p).not.toBeNull();
     expect(p!.action).toBe("buy");
@@ -105,74 +125,64 @@ describe("parseAiProposal", () => {
     expect(p!.rationale).toContain("action=buy");
     expect(p!.snapshotFetchedAt).toBe(context.snapshotFetchedAt);
     expect(p!.model).toBe("jev-latest");
+    expect(p!.candidateKey).toBe(context.candidateKey);
   });
 
-  it("hold needs no size bucket and ignores swap args", () => {
+  it("allows Jev to reject a candidate with hold", () => {
     const a = answers();
     delete a[AI_QID.sizeBucket];
     const p = parseAiProposal({
       ...a,
-      [AI_QID.action]: { type: "choice", choice: "hold", confidence: 0.6 },
+      [AI_QID.action]: { type: "choice", choice: "hold", confidence: 0.9 },
     }, context);
     expect(p).not.toBeNull();
     expect(p!.action).toBe("hold");
     expect(p!.params.sizePct).toBeUndefined();
   });
 
-  it("exits are full-position only and do not require an irrelevant size answer", () => {
-    const a = answers();
-    delete a[AI_QID.sizeBucket];
-    const p = parseAiProposal({
-      ...a,
-      [AI_QID.action]: { type: "choice", choice: "sell", confidence: 0.95 },
-    }, context);
-    expect(p).not.toBeNull();
-    expect(p!.action).toBe("sell");
-    expect(p!.params.sizePct).toBeUndefined();
-  });
-
-  it("returns null on missing, malformed or unsupported action answers", () => {
+  it("rejects unsupported actions and actions that do not match the candidate", () => {
     expect(parseAiProposal({})).toBeNull();
-    expect(parseAiProposal({ [AI_QID.action]: { type: "choice", choice: "yolo", confidence: 0.99 } } as JevAnswers)).toBeNull();
-    expect(parseAiProposal({ ...answers(), [AI_QID.action]: { type: "choice", choice: "buy" } } as unknown as JevAnswers)).toBeNull();
     expect(parseAiProposal({
       ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "rebalance", confidence: 0.99 },
+      [AI_QID.action]: { type: "choice", choice: "sell", confidence: 0.99 },
     })).toBeNull();
+    expect(parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
+    }, context)).toBeNull();
+    expect(parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.9 },
+    }, swapContext)).toBeNull();
   });
 
   it("rejects out-of-range confidence and Noul values instead of clamping them", () => {
     expect(parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "buy", confidence: 1.2 },
-    })).toBeNull();
+    }, context)).toBeNull();
     expect(parseAiProposal({
       ...answers(),
       [AI_QID.riskExecute]: { type: "noul", noul: 1.1 },
-    })).toBeNull();
+    }, context)).toBeNull();
   });
 
-  it("never acts on unsafe data (risk_execute < 0.5 vetoes non-hold actions)", () => {
-    const p = parseAiProposal({ ...answers(), [AI_QID.riskExecute]: { type: "noul", noul: 0.2 } }, context);
-    expect(p).toBeNull();
+  it("rejects candidates under acute market stress or with unsafe data", () => {
+    expect(parseAiProposal({
+      ...answers(),
+      [AI_QID.riskStress]: { type: "noul", noul: 0.9 },
+    }, context)).toBeNull();
+    expect(parseAiProposal({
+      ...answers(),
+      [AI_QID.riskExecute]: { type: "noul", noul: 0.2 },
+    }, context)).toBeNull();
   });
 
-  it("acute stress vetoes entries but not exits", () => {
-    const stressed = { ...answers(), [AI_QID.riskStress]: { type: "noul", noul: 0.9 } };
-    expect(parseAiProposal(stressed, context)).toBeNull();
-    const exit = parseAiProposal({
-      ...stressed,
-      [AI_QID.action]: { type: "choice", choice: "reduce_risk", confidence: 0.95 },
-    }, context);
-    expect(exit).not.toBeNull();
-    expect(exit!.action).toBe("reduce_risk");
-  });
-
-  it("swap requires distinct, closed-set token args with valid confidences", () => {
+  it("swap requires the matching swap candidate and distinct closed-set token args", () => {
     const p = parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-    }, context);
+    }, swapContext);
     expect(p).not.toBeNull();
     expect(p!.params.tokenIn).toBe("WAX");
     expect(p!.params.tokenOut).toBe("LEEF");
@@ -183,14 +193,14 @@ describe("parseAiProposal", () => {
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
       [AI_QID.swapTokenOut]: { type: "choice", choice: "WAX", confidence: 0.9 },
-    }, context);
+    }, swapContext);
     expect(same).toBeNull();
 
     const invented = parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
       [AI_QID.swapTokenOut]: { type: "choice", choice: "FAKE", confidence: 0.9 },
-    }, context);
+    }, swapContext);
     expect(invented).toBeNull();
   });
 
@@ -207,7 +217,7 @@ describe("parseAiProposal", () => {
 });
 
 describe("isAiProposalFresh", () => {
-  it("accepts a recent proposal tied to a current market snapshot", () => {
+  it("accepts a recent proposal tied to the same market snapshot", () => {
     const p = parseAiProposal(answers(), context)!;
     expect(isAiProposalFresh(p, "1970-01-01T00:01:45.000Z", 106_000)).toBe(true);
   });

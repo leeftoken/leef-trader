@@ -16,7 +16,7 @@ AI helper modes are OFF, SUGGEST, and CONTROL:
 
 ## Dual CONTROL decision policy
 
-For Jev BUY/SWAP proposals, all of the following must be true:
+For Jev BUY proposals, all of the following must be true:
 
 1. Jev returns a valid typed proposal and its weakest relevant judgment meets the existing 0.75 confidence floor.
 2. The proposal is bound to a valid source snapshot and is neither stale nor future-dated.

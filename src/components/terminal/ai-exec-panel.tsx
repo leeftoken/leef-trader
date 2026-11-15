@@ -54,11 +54,19 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
     return { at, status: "unavailable", reason };
   }
   const res = await askJev(summary, questions);
+  const receivedAt = Date.now();
   if (!res) {
     journal({ kind: "ai", reason: "jev dry-run: advisory unavailable (null response)" });
     return { at, status: "unavailable", reason: "Jev returned no answer (advisory unavailable)" };
   }
-  const proposal = parseAiProposal(res.answers);
+  const proposal = parseAiProposal(res.answers, {
+    snapshotFetchedAt: summary.fetchedAt,
+    requestedAt: at,
+    receivedAt,
+    model: res.model,
+    candidatesIn: summary.candidatesIn,
+    candidatesOut: summary.candidatesOut,
+  });
   if (!proposal) {
     journal({ kind: "ai", reason: "jev dry-run: answer unusable, no proposal" });
     return { at, status: "rejected", reason: "Jev answer did not yield a usable proposal" };

@@ -817,7 +817,7 @@ async function runBotOnceInner(
       );
       journal({
         kind: "gate",
-        gate: "ai-helper",
+        gate: "ai",
         pass: helperGate.allowed,
         reason: helperGate.reason,
         strategy: b.strategy,

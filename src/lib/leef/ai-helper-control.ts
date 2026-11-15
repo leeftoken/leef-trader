@@ -26,6 +26,21 @@ export const AI_HELPER_REVIEW_MAX_AGE_MS = 45_000;
 export const AI_HELPER_SNAPSHOT_MAX_AGE_MS = 90_000;
 export const AI_PROPOSAL_MAX_AGE_MS = 120_000;
 
+export function isAiProposalFresh(
+  proposal: Pick<AiProposal, "fetchedAt" | "snapshotFetchedAt">,
+  now: number = Date.now(),
+): boolean {
+  const snapshotAt = Date.parse(proposal.snapshotFetchedAt);
+  return (
+    Number.isFinite(proposal.fetchedAt) &&
+    proposal.fetchedAt <= now + 2_000 &&
+    now - proposal.fetchedAt <= AI_PROPOSAL_MAX_AGE_MS &&
+    Number.isFinite(snapshotAt) &&
+    snapshotAt <= now + 2_000 &&
+    now - snapshotAt <= AI_HELPER_SNAPSHOT_MAX_AGE_MS
+  );
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 

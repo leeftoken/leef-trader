@@ -211,7 +211,7 @@ function maybeKickAiPoll(
       // this keeps the trading path independent of the general AI client.
       useTerminal.getState().setAiProposal(
         proposal,
-        proposal ? { market: summary, deterministic } : null,
+        proposal ? { market: summary as unknown as Record<string, unknown>, deterministic } : null,
       );
     } finally {
       aiPollInFlight = false;

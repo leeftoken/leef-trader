@@ -280,9 +280,21 @@ export function resolveTokenId(
   symbol: string,
   graph: Map<TokenId, Edge[]>,
 ): TokenId | null {
-  const s = symbol.toUpperCase();
-  if (s === LEEF_SYMBOL) return leefId();
-  if (s === WAX_SYMBOL) return waxId();
+  const raw = symbol.trim();
+  const at = raw.indexOf("@");
+  const s = (at >= 0 ? raw.slice(0, at) : raw).toUpperCase();
+  if (s === LEEF_SYMBOL) {
+    return at < 0 || raw.slice(at + 1) === LEEF_CONTRACT ? leefId() : null;
+  }
+  if (s === WAX_SYMBOL) {
+    return at < 0 || raw.slice(at + 1) === WAX_CONTRACT ? waxId() : null;
+  }
+  if (at >= 0) {
+    const exact = tokenId(s, raw.slice(at + 1));
+    return graph.has(exact) || [...graph.values()].some((edges) => edges.some((edge) => edge.to === exact))
+      ? exact
+      : null;
+  }
   const matches: TokenId[] = [];
   for (const id of graph.keys()) {
     if (parseId(id).symbol === s) matches.push(id);
@@ -296,18 +308,9 @@ export function resolveTokenId(
     }
   }
   if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0]!;
-  // Prefer the node with the deepest outgoing reserves.
-  let best = matches[0]!;
-  let bestRes = 0;
-  for (const id of matches) {
-    const res = (graph.get(id) ?? []).reduce((s2, e) => s2 + e.reserveIn, 0);
-    if (res > bestRes) {
-      best = id;
-      bestRes = res;
-    }
-  }
-  return best;
+  // A ticker is not an asset identity on WAX. Never route an ambiguous
+  // symbol to whichever contract happens to have the deepest reserves.
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 type Path = { legs: QuoteLeg[]; tvl: number; vol: number };

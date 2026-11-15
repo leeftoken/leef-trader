@@ -488,13 +488,28 @@ let rateLimitedUntil = 0;
 /** Evaluation mutex — paper fills and live quotes must not overlap. */
 let cycleInFlight = false;
 
-/** Keep polling an UNKNOWN txid. Never submits another trade. Unlocks only on fail/confirm. */
+/** Read-only follow-up for an ambiguous bot transaction. */
 function pollUnknown(txid: string): void {
   void (async () => {
     const rec = await reconcileTransfersLater(txid);
-    if (rec.status === "failed") markFailed();
-    else if (rec.status === "confirmed") markConfirmed();
-    // still unknown → stay locked
+    if (rec.status === "failed") {
+      // Two agreeing indexers say nothing moved; it is safe to release the lock.
+      markFailed();
+      useBot.getState().setLastReason(`Transaction ${txid.slice(0, 10)}… failed on-chain; no fill was booked.`);
+    } else if (rec.status === "confirmed" && rec.transfers.length > 0) {
+      // The original bot cycle returned before applying this fill to its
+      // in-memory position. Do not unlock and risk acting on stale position
+      // state; the persisted lock requires an explicit reconciliation path.
+      markUnknown(txid);
+      useBot.getState().setLastReason(
+        `Transaction ${txid.slice(0, 10)}… is confirmed on-chain, but bot state needs reconciliation before trading can resume.`,
+      );
+    } else {
+      markUnknown(txid);
+      useBot.getState().setLastReason(
+        `Transaction ${txid.slice(0, 10)}… is still awaiting transfer evidence; live capital remains locked.`,
+      );
+    }
   })();
 }
 
@@ -1632,17 +1647,23 @@ async function runBotOnceInner(
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
-            const actual = assetDelta(rec.transfers, w.account, b.base || "LEEF");
-            if (actual > 0) amountLeef = actual;
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included (transfers pending)";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
-            markConfirmed();
-            if (rec.transfers.length === 0) {
-              void reconcileTransfersLater(txid);
+            const baseMeta = metaOf(baseTok, book);
+            const quoteMeta = metaOf(quoteTok, book);
+            const actual = assetDelta(rec.transfers, w.account, baseMeta.symbol, baseMeta.contract);
+            const spent = assetDelta(rec.transfers, w.account, quoteMeta.symbol, quoteMeta.contract);
+            if (actual > 0 && spent < 0) {
+              amountLeef = actual;
+              note = " · confirmed on-chain";
+              execStatus = "confirmed";
+              markConfirmed();
+            } else {
+              markUnknown(txid);
+              note = " · transfer details do not match the expected token pair";
+              void pollUnknown(txid);
             }
           } else {
             markUnknown(txid);
-            note = " · broadcast, confirmation pending — not retrying";
+            note = " · broadcast, transfer reconciliation pending — not retrying";
             void pollUnknown(txid);
           }
         } catch (err) {
@@ -1655,6 +1676,25 @@ async function runBotOnceInner(
         if (feeSpec) amountLeef -= feeSpec.amount;
         w.applyPaperFill(b.quote || "WAX", decision.amountIn, b.base || "LEEF", amountLeef);
       }
+      if (live && execStatus !== "confirmed") {
+        const reason = `Buy broadcast ${txid ? txid.slice(0, 10) + "…" : ""} is not yet transfer-settled. Estimated router output is not booked as a position or P&L.`;
+        b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, b.stats.lastPnlUsd));
+        b.clearRejectionStreak();
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd, txid });
+        journal({
+          kind: "execution", action: "buy", strategy: b.strategy, mode,
+          tokenIn: quoteTok, tokenOut: baseTok,
+          amountIn: decision.amountIn, expectedOut: decision.route.amountOut,
+          txid, status: "unknown",
+          predEdgePct: decision.edge?.netEdgePct,
+          latencyMs: Date.now() - tExec,
+          ...routeJournalMeta(decision.route, decision.amountIn, bounds.quoteUsd),
+          ...ctxOf(), leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
+        });
+        return decision;
+      }
+
       // Average into an existing position (DCA) or open a fresh one.
       // Costs are USD: quote-side spend × the quote token's oracle price,
       // base-side marks × the base token's oracle price — no WAX/LEEF wiring.
@@ -1784,15 +1824,22 @@ async function runBotOnceInner(
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
-            const actual = assetDelta(rec.transfers, w.account, sellQuoteMeta.symbol, sellQuoteMeta.contract);
-            if (actual > 0) quoteOut = actual;
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included (transfers pending)";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
-            markConfirmed();
-            if (rec.transfers.length === 0) void reconcileTransfersLater(txid);
+            const baseMeta = metaOf(b.base || "LEEF", book);
+            const actualIn = assetDelta(rec.transfers, w.account, baseMeta.symbol, baseMeta.contract);
+            const actualOut = assetDelta(rec.transfers, w.account, sellQuoteMeta.symbol, sellQuoteMeta.contract);
+            if (actualIn < 0 && actualOut > 0) {
+              quoteOut = actualOut;
+              note = " · confirmed on-chain";
+              execStatus = "confirmed";
+              markConfirmed();
+            } else {
+              markUnknown(txid);
+              note = " · transfer details do not match the expected token pair";
+              void pollUnknown(txid);
+            }
           } else {
             markUnknown(txid);
-            note = " · broadcast, confirmation pending — not retrying";
+            note = " · broadcast, transfer reconciliation pending — not retrying";
             void pollUnknown(txid);
           }
         } catch (err) {
@@ -1803,6 +1850,23 @@ async function runBotOnceInner(
         const feeSpec = platformFeeOn(quoteOut, metaOf(quoteTok, book));
         if (feeSpec) quoteOut -= feeSpec.amount;
         w.applyPaperFill(b.base || "LEEF", decision.amountLeef, b.quote || "WAX", quoteOut);
+      }
+      if (live && execStatus !== "confirmed") {
+        const reason = `Sell broadcast ${txid ? txid.slice(0, 10) + "…" : ""} is not yet transfer-settled. The tracked position and realized P&L are unchanged.`;
+        b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, b.stats.lastPnlUsd));
+        b.clearRejectionStreak();
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd, txid });
+        journal({
+          kind: "execution", action: "sell", strategy: position?.strategy ?? b.strategy, mode,
+          tokenIn: b.base || "LEEF", tokenOut: b.quote || "WAX",
+          amountIn: decision.amountLeef, expectedOut: decision.route.amountOut,
+          txid, status: "unknown",
+          latencyMs: Date.now() - t0,
+          ...routeJournalMeta(decision.route, decision.amountLeef, usdPriceOf(b.base || "LEEF", book) || book.leefUsd),
+          ...ctxOf(), leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
+        });
+        return decision;
       }
       const pnlUsd = position ? quoteOut * bounds.quoteUsd - position.entryCostUsd : 0;
       b.setPosition(null);
@@ -1911,13 +1975,23 @@ async function runBotOnceInner(
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
-            markConfirmed();
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
-            if (rec.transfers.length === 0) void reconcileTransfersLater(txid);
+            const inMeta = metaOf(decision.tokenIn, book);
+            const outMeta = metaOf(decision.tokenOut, book);
+            const actualIn = assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
+            const actualOut = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
+            if (actualIn < 0 && actualOut > 0) {
+              outAmt = actualOut;
+              markConfirmed();
+              note = " · confirmed on-chain";
+              execStatus = "confirmed";
+            } else {
+              markUnknown(txid);
+              note = " · transfer details do not match the expected token pair";
+              void pollUnknown(txid);
+            }
           } else {
             markUnknown(txid);
-            note = " · broadcast, confirmation pending — not retrying";
+            note = " · broadcast, transfer reconciliation pending — not retrying";
             void pollUnknown(txid);
           }
         } catch (err) {
@@ -1928,6 +2002,22 @@ async function runBotOnceInner(
         const feeSpec = platformFeeOn(outAmt, metaOf(decision.tokenOut, book));
         if (feeSpec) outAmt -= feeSpec.amount;
         w.applyPaperFill(decision.tokenIn, decision.amountIn, decision.tokenOut, outAmt);
+      }
+      if (live && execStatus !== "confirmed") {
+        const reason = `Swap broadcast ${txid ? txid.slice(0, 10) + "…" : ""} is awaiting transfer settlement. Router estimates are not counted as realized P&L.`;
+        b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, b.stats.lastPnlUsd));
+        b.clearRejectionStreak();
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd, txid });
+        journal({
+          kind: "execution", action: "swap", strategy: b.strategy, mode,
+          tokenIn: decision.tokenIn, tokenOut: decision.tokenOut,
+          amountIn: decision.amountIn, expectedOut: decision.route.amountOut,
+          txid, status: "unknown", latencyMs: Date.now() - tExec,
+          ...routeJournalMeta(decision.route, decision.amountIn, usdPriceOf(decision.tokenIn, book) || 0),
+          ...ctxOf(), leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
+        });
+        return decision;
       }
       const inUsd = decision.amountIn * (usdPriceOf(decision.tokenIn, book) || 0);
       const outUsd = outAmt * (usdPriceOf(decision.tokenOut, book) || 0);
@@ -2092,14 +2182,21 @@ async function runBotOnceInner(
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
-            realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included (transfers pending)";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
-            markConfirmed();
-            if (rec.transfers.length === 0) void reconcileTransfersLater(txid);
+            const spent = rec.transfers.some((t) => t.contract === qContract && t.symbol === qSym && t.from === w.account);
+            const received = rec.transfers.some((t) => t.contract === qContract && t.symbol === qSym && t.to === w.account);
+            if (spent && received) {
+              realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
+              note = " · confirmed on-chain";
+              execStatus = "confirmed";
+              markConfirmed();
+            } else {
+              markUnknown(txid);
+              note = " · quote-token transfers are incomplete";
+              void pollUnknown(txid);
+            }
           } else {
             markUnknown(txid);
-            note = " · broadcast, confirmation pending — not retrying";
+            note = " · broadcast, transfer reconciliation pending — not retrying";
             void pollUnknown(txid);
           }
         } catch (err) {
@@ -2110,6 +2207,23 @@ async function runBotOnceInner(
         // Same symbol in and out — the fill nets the profit onto the balance.
         const feeSpec = platformFeeOn(plan.quoteOut, metaOf(qSym, book));
         w.applyPaperFill(qSym, plan.quoteIn, qSym, plan.quoteOut - (feeSpec?.amount ?? 0));
+      }
+      if (live && execStatus !== "confirmed") {
+        const reason = `Arbitrage broadcast ${txid ? txid.slice(0, 10) + "…" : ""} is awaiting exact quote-token transfer settlement. Estimated spread is not booked as realized P&L.`;
+        b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, b.stats.lastPnlUsd));
+        b.clearRejectionStreak();
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd, txid });
+        journal({
+          kind: "execution", action: "arb", strategy: b.strategy, mode,
+          tokenIn: qSym, tokenOut: qSym, amountIn: plan.quoteIn,
+          expectedOut: plan.quoteOut, txid, status: "unknown",
+          predEdgePct: plan.profitPct * 100, latencyMs: Date.now() - t0,
+          poolIds: [plan.buyPool.id, plan.sellPool.id], hops: 2, venues: ["alcor"],
+          sizeUsd: plan.quoteIn * quoteMarkUsd,
+          ...ctxOf(), leefUsd: snap.leefUsd, waxUsd: snap.waxUsd,
+        });
+        return decision;
       }
       const pnlUsd =
         realizedQuote != null

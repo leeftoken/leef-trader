@@ -28,6 +28,20 @@ function summary(): AiSnapshotSummary {
   };
 }
 
+function metadata(summary = summaryForTest(), receivedAt = Date.parse("2026-11-15T12:00:00.000Z")) {
+  return {
+    snapshotFetchedAt: summary.fetchedAt,
+    candidatesIn: summary.candidatesIn,
+    candidatesOut: summary.candidatesOut,
+    model: "jev-latest",
+    receivedAt,
+  };
+}
+
+function summaryForTest(): AiSnapshotSummary {
+  return summary();
+}
+
 function answers(over: Partial<JevAnswers> = {}): JevAnswers {
   return {
     [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.9 },
@@ -45,9 +59,7 @@ describe("buildAiQuestions", () => {
     const q = buildAiQuestions(summary());
     expect(q[AI_QID.action]?.type).toBe("choice");
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(
-      expect.arrayContaining(["hold", "buy", "sell", "swap", "rebalance", "reduce_risk", "cancel_all"]),
-    );
+    expect(Object.keys(criteria)).toEqual(["hold", "buy", "sell", "swap", "reduce_risk"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
     expect(q[AI_QID.swapTokenIn]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
@@ -68,6 +80,9 @@ describe("parseAiProposal", () => {
     expect(p!.confidence).toBeLessThanOrEqual(0.8);
     expect(p!.confidence).toBeGreaterThanOrEqual(AI_EXEC_CONFIDENCE_MIN - 0.2);
     expect(p!.rationale).toContain("action=buy");
+    expect(p!.proposalId).toContain("jev:");
+    expect(p!.snapshotFetchedAt).toBe(summary().fetchedAt);
+    expect(p!.model).toBe("jev-latest");
   });
 
   it("hold needs no size bucket and ignores swap args", () => {
@@ -108,7 +123,7 @@ describe("parseAiProposal", () => {
     const p = parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-    });
+    }, metadata());
     expect(p).not.toBeNull();
     expect(p!.params.tokenIn).toBe("WAX");
     expect(p!.params.tokenOut).toBe("LEEF");
@@ -120,8 +135,28 @@ describe("parseAiProposal", () => {
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
       [AI_QID.swapTokenOut]: { type: "choice", choice: "WAX", confidence: 0.9 },
-    });
+    }, metadata());
     expect(same).toBeNull();
+  });
+
+  it("rejects swap arguments outside the request's closed token sets", () => {
+    const p = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
+      [AI_QID.swapTokenIn]: { type: "choice", choice: "FAKE", confidence: 0.99 },
+    }, metadata());
+    expect(p).toBeNull();
+  });
+
+  it("rejects out-of-range model probabilities rather than clamping them", () => {
+    expect(parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 1.5 },
+    }, metadata())).toBeNull();
+    expect(parseAiProposal({
+      ...answers(),
+      [AI_QID.riskStress]: { type: "noul", noul: -0.1 },
+    }, metadata())).toBeNull();
   });
 
   it("unknown size bucket is unusable", () => {

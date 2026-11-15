@@ -66,9 +66,8 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
     model: res.model,
     candidateKind: summary.candidateKind,
     candidateKey: summary.candidateKey,
+    candidate: summary.candidate,
     allowedActions: summary.allowedActions,
-    candidatesIn: summary.candidatesIn,
-    candidatesOut: summary.candidatesOut,
   });
   if (!proposal) {
     journal({ kind: "ai", reason: "jev dry-run: answer unusable, no proposal" });

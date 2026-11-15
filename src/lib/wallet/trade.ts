@@ -279,7 +279,10 @@ export async function executeSwap(opts: {
           if (settled.status !== "confirmed") return;
           const spent = assetDelta(settled.transfers, w.account, inMeta.symbol, inMeta.contract);
           const received = assetDelta(settled.transfers, w.account, outMeta.symbol, outMeta.contract);
-          if (!(spent < 0 && received > 0)) markUnknown(settled.txid);
+          const exactDebit =
+            spent < 0 &&
+            Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
+          if (!(exactDebit && received > 0)) markUnknown(settled.txid);
         },
       });
       const { txid, reconciliation: rec } = coordinated;
@@ -290,7 +293,10 @@ export async function executeSwap(opts: {
       if (rec.status === "confirmed") {
         const spent = assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
         const actual = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
-        if (spent < 0 && actual > 0) {
+        const exactDebit =
+          spent < 0 &&
+          Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
+        if (exactDebit && actual > 0) {
           amountOut = actual;
           confirmed = true;
         } else {
@@ -333,7 +339,10 @@ export async function executeSwap(opts: {
         if (settled.status !== "confirmed") return;
         const spent = assetDelta(settled.transfers, w.account, inMeta.symbol, inMeta.contract);
         const received = assetDelta(settled.transfers, w.account, outMeta.symbol, outMeta.contract);
-        if (!(spent < 0 && received > 0)) markUnknown(settled.txid);
+        const exactDebit =
+          spent < 0 &&
+          Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
+        if (!(exactDebit && received > 0)) markUnknown(settled.txid);
       },
     });
     const exec = coordinated.value;
@@ -347,7 +356,10 @@ export async function executeSwap(opts: {
     if (rec.status === "confirmed") {
       const spent = assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
       const actual = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
-      if (spent < 0 && actual > 0) {
+      const exactDebit =
+        spent < 0 &&
+        Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
+      if (exactDebit && actual > 0) {
         amountOut = actual;
         confirmed = true;
       } else {

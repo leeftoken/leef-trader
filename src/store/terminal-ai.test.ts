@@ -77,7 +77,8 @@ describe("aiHelperControl (strategic second-key review)", () => {
     expect(useTerminal.getState().aiHelperControl).toBe("suggest");
     expect(useTerminal.getState().aiHelperReview).toBeNull();
 
-    useTerminal.getState().setAiHelperControl("control", true);
+    useTerminal.getState().setAiControl("control", true);
+    expect(useTerminal.getState().setAiHelperControl("control", true)).toBe(true);
     expect(useTerminal.getState().aiHelperControl).toBe("control");
     useTerminal.getState().setAiControl("off");
     expect(useTerminal.getState().aiHelperControl).toBe("off");

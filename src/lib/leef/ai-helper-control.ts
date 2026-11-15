@@ -10,6 +10,11 @@ export interface AiHelperCandidate {
   proposedAt: number;
 }
 
+export interface AiHelperReviewContext {
+  market: Record<string, unknown>;
+  deterministic: Record<string, unknown>;
+}
+
 export interface AiHelperReview {
   candidateId: string;
   snapshotFetchedAt: string;

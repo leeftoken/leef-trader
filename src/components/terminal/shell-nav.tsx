@@ -78,6 +78,7 @@ export function MobileNav({ poolCount }: { poolCount: number }) {
             onClick={() => setOpen(true)}
             aria-haspopup="dialog"
             aria-expanded={open}
+            aria-current={more.some((t) => t.id === tab) ? "page" : undefined}
             className={cn(
               "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-leef/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
               more.some((t) => t.id === tab) ? "bg-leef/[0.06] text-leef" : "text-muted-foreground hover:bg-surface-2/70 hover:text-fg",

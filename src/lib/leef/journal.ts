@@ -130,6 +130,11 @@ export type JournalEntry = {
   /** The HOLD reason class being judged. */
   holdReasonClass?: string;
 
+  /** AI provenance — structured metadata only; never credentials or raw prompts. */
+  aiSource?: "jev" | "helper";
+  aiModel?: string;
+  aiSnapshotAt?: string;
+
   /** learning entries (artifact lifecycle: proposed/shadow/promoted/rolled_back/expired) */
   artifactId?: string;
   artifactType?: string;

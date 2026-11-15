@@ -1603,6 +1603,7 @@ async function runBotOnceInner(
     if (decision.kind === "buy") {
       const minOut = decision.route.amountOut * (1 - b.risk.slippage / 100);
       let amountLeef = minOut;
+      let quoteSpent = decision.amountIn;
       let txid: string | undefined;
       let note = "";
       let feeInfo: { amount: number; symbol: string } | undefined;
@@ -1756,11 +1757,11 @@ async function runBotOnceInner(
         platformFeeToken: feeInfo?.symbol,
         platformFeeCollected:
           live && execStatus === "confirmed" && feeInfo ? true : undefined,
-        ...routeJournalMeta(decision.route, decision.amountIn, bounds.quoteUsd),
+        ...routeJournalMeta(decision.route, quoteSpent, bounds.quoteUsd),
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
-      if (live && (execStatus === "confirmed" || execStatus === "included")) {
+      if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
           decision.route.poolIds[0],
@@ -1777,7 +1778,7 @@ async function runBotOnceInner(
         mode,
         tokenIn: quoteTok,
         tokenOut: baseTok,
-        amountIn: decision.amountIn,
+        amountIn: quoteSpent,
         routes: [decision.route],
         reason: decision.reason,
         ctx: ctxOf(),

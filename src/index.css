@@ -79,17 +79,17 @@
   --font-sans: "Inter", "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --color-bg: #0a0c11;
-  --color-fg: #f0f3f6;
-  --color-surface: #10141c;
-  --color-surface-2: #161b25;
-  --color-surface-3: #1f2531;
-  --color-subtle: #707886;
-  --color-leef: #34d399;
-  --color-wax: #d9ad55;
-  --color-buy: #2ebd85;
-  --color-sell: #f6465d;
-  --color-warn: #e8a33d;
+  --color-bg: #080c11;
+  --color-fg: #edf4f2;
+  --color-surface: #0e151d;
+  --color-surface-2: #151e29;
+  --color-surface-3: #202c39;
+  --color-subtle: #8491a1;
+  --color-leef: #42e6a6;
+  --color-wax: #e1b65e;
+  --color-buy: #36c995;
+  --color-sell: #f05d70;
+  --color-warn: #edb05b;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --motion-quick: 150ms;
@@ -153,48 +153,48 @@
 }
 
 .dark {
-  --background: #0a0c11;
-  --foreground: #f0f3f6;
+  --background: #080c11;
+  --foreground: #edf4f2;
 
-  --card: #10141c;
-  --card-foreground: #f0f3f6;
+  --card: #0e151d;
+  --card-foreground: #edf4f2;
 
-  --popover: #161b25;
-  --popover-foreground: #f0f3f6;
+  --popover: #131c26;
+  --popover-foreground: #edf4f2;
 
-  --primary: #34d399;
-  --primary-foreground: #05241a;
+  --primary: #42e6a6;
+  --primary-foreground: #06251b;
 
-  --secondary: #1f2531;
-  --secondary-foreground: #f0f3f6;
+  --secondary: #202c39;
+  --secondary-foreground: #edf4f2;
 
-  --muted: #161b25;
-  --muted-foreground: #98a1af;
+  --muted: #151e29;
+  --muted-foreground: #9aa8b6;
 
-  --accent: #34d399;
-  --accent-foreground: #05241a;
+  --accent: #42e6a6;
+  --accent-foreground: #06251b;
 
-  --destructive: #f6465d;
+  --destructive: #f05d70;
   --destructive-foreground: hsl(210 40% 98%);
 
-  --border: #1e2430;
-  --input: #1e2430;
-  --ring: #34d399;
+  --border: #202c39;
+  --input: #263443;
+  --ring: #42e6a6;
 
-  --chart-1: #34d399;
-  --chart-2: #2ebd85;
-  --chart-3: #d9ad55;
-  --chart-4: #f6465d;
-  --chart-5: #e8a33d;
+  --chart-1: #42e6a6;
+  --chart-2: #36c995;
+  --chart-3: #e1b65e;
+  --chart-4: #f05d70;
+  --chart-5: #edb05b;
 
-  --sidebar: #10141c;
-  --sidebar-foreground: #f0f3f6;
-  --sidebar-primary: #34d399;
-  --sidebar-primary-foreground: #05241a;
-  --sidebar-accent: #161b25;
-  --sidebar-accent-foreground: #f0f3f6;
-  --sidebar-border: #1e2430;
-  --sidebar-ring: #34d399;
+  --sidebar: #0e151d;
+  --sidebar-foreground: #edf4f2;
+  --sidebar-primary: #42e6a6;
+  --sidebar-primary-foreground: #06251b;
+  --sidebar-accent: #151e29;
+  --sidebar-accent-foreground: #edf4f2;
+  --sidebar-border: #202c39;
+  --sidebar-ring: #42e6a6;
 }
 
 @layer base {
@@ -240,6 +240,15 @@
     cursor: pointer;
   }
 
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--color-leef) 82%, white);
+    outline-offset: 3px;
+  }
+
+  [id] {
+    scroll-margin-top: 5.5rem;
+  }
+
   h1,
   h2,
   h3 {
@@ -273,21 +282,33 @@
 /* Ambient page glow behind the app shell */
 .app-glow {
   background:
-    radial-gradient(1100px 480px at 15% -10%, color-mix(in oklab, var(--color-leef) 7%, transparent), transparent 60%),
-    radial-gradient(900px 420px at 85% -12%, color-mix(in oklab, var(--color-wax) 5%, transparent), transparent 60%),
+    radial-gradient(920px 520px at 8% -14%, color-mix(in oklab, var(--color-leef) 10%, transparent), transparent 62%),
+    radial-gradient(760px 460px at 94% -10%, color-mix(in oklab, var(--color-wax) 7%, transparent), transparent 64%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-surface) 26%, transparent), transparent 38%),
     var(--color-bg);
 }
 
 /* Elevated panel used by KPI / stat cards */
 .stat-card {
   position: relative;
+  overflow: hidden;
   border-radius: var(--radius-xl);
-  border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
-  background: linear-gradient(180deg, color-mix(in oklab, var(--color-surface-2) 60%, transparent), transparent 55%), var(--color-surface);
-  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -16px rgb(0 0 0 / 0.6);
-  transition: border-color var(--motion-quick) var(--ease-out), transform var(--motion-quick) var(--ease-out);
+  border: 1px solid color-mix(in oklab, var(--color-border) 84%, transparent);
+  background:
+    linear-gradient(145deg, color-mix(in oklab, var(--color-leef) 4%, transparent), transparent 54%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-surface-2) 72%, transparent), transparent 68%),
+    var(--color-surface);
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.045) inset, 0 16px 36px -24px rgb(0 0 0 / 0.9);
+  transition: border-color var(--motion-quick) var(--ease-out), box-shadow var(--motion-quick) var(--ease-out), transform var(--motion-quick) var(--ease-out);
 }
-.stat-card:hover {
-  border-color: var(--color-surface-3);
+.stat-card:hover,
+.stat-card:focus-within {
+  border-color: color-mix(in oklab, var(--color-leef) 30%, var(--color-border));
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.06) inset, 0 20px 44px -25px rgb(0 0 0 / 0.96);
+}
+@media (hover: hover) and (pointer: fine) {
+  .stat-card:hover {
+    transform: translateY(-2px);
+  }
 }
 

@@ -62,6 +62,7 @@ export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, 
 /** One deterministic BUY candidate; Jev can confirm or reject it, never replace it. */
 export interface AiEngineCandidate {
   id: string;
+  snapshotFetchedAt: string;
   tokenIn: string;
   tokenOut: string;
   amountIn: number;

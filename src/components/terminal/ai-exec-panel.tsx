@@ -58,7 +58,13 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
     journal({ kind: "ai", reason: "jev dry-run: advisory unavailable (null response)" });
     return { at, status: "unavailable", reason: "Jev returned no answer (advisory unavailable)" };
   }
-  const proposal = parseAiProposal(res.answers);
+  const proposal = parseAiProposal(res.answers, {
+    snapshotFetchedAt: summary.fetchedAt,
+    candidatesIn: summary.candidatesIn,
+    candidatesOut: summary.candidatesOut,
+    model: res.model,
+    receivedAt: Date.now(),
+  });
   if (!proposal) {
     journal({ kind: "ai", reason: "jev dry-run: answer unusable, no proposal" });
     return { at, status: "rejected", reason: "Jev answer did not yield a usable proposal" };
@@ -118,9 +124,14 @@ const MODE_COPY: Record<AiControlMode, string> = {
 
 export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
   const { mode, persisted, setMode } = useAiControl();
+  const helperMode = useTerminal((s) => s.aiHelperControl);
+  const setHelperMode = useTerminal((s) => s.setAiHelperControl);
+  const helperReview = useTerminal((s) => s.aiHelperReview);
+  const helperEnabled = useTerminal((s) => s.aiEnabled);
   const setTab = useTerminal((s) => s.setTab);
   const setSwap = useTerminal((s) => s.setSwap);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [helperConfirmOpen, setHelperConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [runs, setRuns] = useState<DryRun[]>([]);
   const now = useNow(5000);
@@ -213,6 +224,88 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-border bg-bg p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">Strategic AI helper control</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              In CONTROL, the helper is a second-key reviewer for Jev buy/swap proposals.
+              It can veto or abstain, but cannot invent trades, size positions, choose routes,
+              sign, or block protective exits.
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-border" role="radiogroup" aria-label="Strategic AI helper control mode">
+            {([
+              ["off", "OFF"],
+              ["suggest", "SUGGEST"],
+              ["control", "CONTROL"],
+            ] as const).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={helperMode === m}
+                disabled={m !== "off" && (!helperEnabled || mode === "off")}
+                onClick={() => selectHelperMode(m)}
+                className={cn(
+                  "px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                  helperMode === m
+                    ? m === "control"
+                      ? "bg-warn/15 text-warn"
+                      : "bg-accent/15 text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline" className={cn(helperMode === "control" && "border-warn/40 text-warn")}>
+            HELPER {helperMode.toUpperCase()}
+          </Badge>
+          {helperMode === "off"
+            ? "No strategic helper review is requested for Jev proposals."
+            : helperMode === "suggest"
+              ? "Reviews are visible but do not affect execution."
+              : "Dual CONTROL: fresh Jev confidence and fresh helper approval are both required for new exposure."}
+          {!helperEnabled && <span>· Turn on the AI helper in the AI desk first.</span>}
+          {mode === "off" && <span>· Enable Jev SUGGEST or CONTROL first.</span>}
+        </div>
+        {mode !== "off" && helperMode !== "off" && (
+          <div className="mt-3 rounded-md border border-border/70 px-3 py-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">Latest helper review</span>
+              {helperReview ? (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    helperReview.decision === "approve" && helperReview.confidence >= 0.82 && helperReview.riskFlags.length === 0
+                      ? "border-leef/40 text-leef"
+                      : "border-warn/40 text-warn",
+                  )}
+                >
+                  {helperReview.decision.toUpperCase()} · {fmtNum(helperReview.confidence, { digits: 2 })}
+                </Badge>
+              ) : (
+                <Badge variant="outline">Pending / unavailable</Badge>
+              )}
+            </div>
+            <p className="mt-1 text-muted-foreground">
+              {helperReview
+                ? helperReview.reason
+                : helperMode === "control"
+                  ? "No candidate-bound approval yet. Risk-increasing entries remain paused."
+                  : "No strategic review has arrived yet."}
+            </p>
+            {helperReview?.riskFlags.length ? (
+              <p className="mt-1 text-warn">Risk flags: {helperReview.riskFlags.join(", ")}</p>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -328,7 +421,57 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
         </div>
       )}
 
-      {/* Explicit risk confirm for CONTROL — no accidental enable. */}
+      <AlertDialog open={helperConfirmOpen} onOpenChange={setHelperConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="size-5 text-warn" />
+              Enable strategic AI helper CONTROL?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  The helper will independently review each Jev buy/swap proposal. In combined
+                  CONTROL, both models must return fresh, candidate-matched approvals.
+                </p>
+                <p>
+                  The helper may veto or abstain. It cannot create or change a trade, set
+                  amounts, choose routes, sign, or submit transactions. Missing, malformed,
+                  low-confidence, stale, or risk-flagged reviews pause new entries. Protective
+                  exits and the deterministic execution gates remain in force.
+                </p>
+                <p>
+                  The helper receives the proposal, compact market data, wallet balance
+                  amounts, strategy, position context and risk settings through the configured
+                  AI gateway. No wallet keys, signing material, memos or signed transactions
+                  are sent.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                const ok = setHelperMode("control", true);
+                if (!ok) {
+                  e.preventDefault();
+                  toast({
+                    title: "Helper CONTROL refused",
+                    description: "Enable Jev CONTROL and the AI helper before enabling dual CONTROL.",
+                  });
+                  return;
+                }
+                setHelperConfirmOpen(false);
+              }}
+            >
+              I understand — enable helper CONTROL
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Explicit risk confirm for Jev CONTROL — no accidental enable. */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

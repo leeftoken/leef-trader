@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { DEFAULT_AI_GATEWAY } from "@/lib/leef/ai-analyst";
 import type { AiProposal } from "@/lib/leef/ai-executor";
+import type { AiHelperReview } from "@/lib/leef/ai-helper-control";
 import { setLearningModeProvider } from "@/lib/leef/learning-store";
 
 /** Book-pull cadence. Live = 10s — fastest that stays polite to Alcor. */
@@ -52,8 +53,15 @@ type TerminalState = {
    * requires the explicit confirm step (UI risk dialog → confirmed: true).
    */
   aiControl: "off" | "suggest" | "control";
+  /**
+   * Strategic AI helper mode. In CONTROL it is a second-key supervisor for
+   * risk-increasing Jev proposals; it cannot create or execute trades.
+   */
+  aiHelperControl: "off" | "suggest" | "control";
   /** Latest Jev proposal for the AI desk (ephemeral — never persisted). */
   aiProposal: AiProposal | null;
+  /** Candidate-bound strategic helper review (ephemeral — never persisted). */
+  aiHelperReview: AiHelperReview | null;
   /**
    * Swap-flow danger guard (audit E-1) kill-switch. When ON, Hyperion logswap
    * flow may RAISE the danger score (veto/size-down entries); it never
@@ -99,7 +107,9 @@ type TerminalState = {
    * mode was applied. Leaving "control" never requires confirmation.
    */
   setAiControl: (mode: "off" | "suggest" | "control", confirmed?: boolean) => boolean;
+  setAiHelperControl: (mode: "off" | "suggest" | "control", confirmed?: boolean) => boolean;
   setAiProposal: (p: AiProposal | null) => void;
+  setAiHelperReview: (review: AiHelperReview | null) => void;
   setFlowGuardEnabled: (on: boolean) => void;
   setLearningMode: (mode: "suggest" | "controlled") => void;
   setAiReviewEveryTrades: (n: number) => void;
@@ -125,7 +135,9 @@ export const useTerminal = create<TerminalState>()(
   selectedRouteSig: null,
   aiEnabled: true,
   aiControl: "off",
+  aiHelperControl: "off",
   aiProposal: null,
+  aiHelperReview: null,
   flowGuardEnabled: true,
   learningMode: "suggest",
   aiReviewEveryTrades: 8,
@@ -175,17 +187,24 @@ export const useTerminal = create<TerminalState>()(
     }),
     {
       name: "leef-terminal-sync",
-      version: 2,
+      version: 3,
       // v1 → v2: aiControl is new. The safe default is ALWAYS "off" — the
       // legacy aiEnabled flag gated only the advisory analyst gateway and
       // must never imply execution authority.
-      migrate: (persisted) => ({ ...(persisted as object), aiControl: "off" }),
+      migrate: (persisted, version) => ({
+        ...(persisted as object),
+        aiControl: version < 2
+          ? "off"
+          : ((persisted as { aiControl?: "off" | "suggest" | "control" }).aiControl ?? "off"),
+        aiHelperControl: "off",
+      }),
       partialize: (s) => ({
         syncSec: s.syncSec,
         aiGatewayUrl: s.aiGatewayUrl,
         swapMaxHops: s.swapMaxHops,
         aiEnabled: s.aiEnabled,
         aiControl: s.aiControl,
+        aiHelperControl: s.aiHelperControl,
         flowGuardEnabled: s.flowGuardEnabled,
         learningMode: s.learningMode,
         aiReviewEveryTrades: s.aiReviewEveryTrades,

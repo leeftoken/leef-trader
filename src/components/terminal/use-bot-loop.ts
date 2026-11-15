@@ -103,6 +103,7 @@ function maybeKickAiPoll(
   snap: LeefSnapshot,
   b: ReturnType<typeof useBot.getState>,
   balances: Record<string, number>,
+  mode: "paper" | "live",
 ): void {
   if (import.meta.env.MODE === "test") return;
   if (useTerminal.getState().aiControl === "off") return;
@@ -131,9 +132,17 @@ function maybeKickAiPoll(
       if (proposal) {
         journal({
           kind: "ai",
+          decision: proposal.action,
+          strategy: b.strategy,
+          mode,
           reason: `jev proposal ${proposal.action} · model=${proposal.model} · confidence=${proposal.confidence.toFixed(2)} · snapshot=${proposal.snapshotFetchedAt}`,
           latencyMs: receivedAt - requestedAt,
           confidence: proposal.confidence,
+          regime: summary.market.regime,
+          volPct: summary.market.volatilityPct,
+          dangerScore: summary.market.dangerScore,
+          leefUsd: summary.leefUsd,
+          waxUsd: summary.waxUsd,
         });
       } else {
         journal({
@@ -545,7 +554,7 @@ async function runBotOnceInner(
 
   // Jev poll (suggest/control only; "off" = zero calls). The proposal is
   // consumed by the AI desk and, in "control", by the seam below.
-  maybeKickAiPoll(snap, b, balances);
+  maybeKickAiPoll(snap, b, balances, mode);
 
   let decision = evaluateBot({
     now: Date.now(),

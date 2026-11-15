@@ -434,7 +434,7 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
               <Brain className="size-5" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold">AI analyst</h2>
+              <h2 className="text-lg font-semibold">AI Helper · strategic learning</h2>
               <p className="text-sm text-muted-foreground max-w-prose">
                 Your Cloudflare gateway ({hostLabel(aiGatewayUrl)}) sends a
                 compact context to the model and returns structured commentary. The AI is an{" "}

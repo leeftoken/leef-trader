@@ -162,9 +162,20 @@ function aiEngineCandidateOf(
   const amountIn = Number(decision.amountIn.toPrecision(12));
   const routeSig = routeSignature(decision.route);
   return {
-    id: ["engine-buy", b.strategy, tokenIn, tokenOut, amountIn.toPrecision(12), routeSig,
+    id: [
+      "engine-buy",
+      b.strategy,
+      tokenIn,
+      tokenOut,
+      amountIn.toPrecision(12),
+      routeSig,
       (decision.edge?.netEdgePct ?? 0).toFixed(2),
       decision.route.priceImpact.toFixed(4),
+      b.risk.minTradeUsd.toPrecision(10),
+      b.risk.maxPositionUsd.toPrecision(10),
+      b.risk.maxImpactPct.toFixed(4),
+      b.risk.slippage.toFixed(4),
+      b.goals.maxDrawdownPct.toFixed(4),
     ].join(":"),
     snapshotFetchedAt,
     tokenIn,
@@ -197,8 +208,12 @@ function maybeKickAiPoll(
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
-  const summary = { ...aiSummaryOf(snap, b, balances), engineCandidate };
   const deterministic = helperDeterministicContext(snap, b);
+  const summary = {
+    ...aiSummaryOf(snap, b, balances),
+    engineCandidate,
+    deterministic,
+  };
   void (async () => {
     try {
       const res = await askJev(summary, buildAiQuestions(summary));

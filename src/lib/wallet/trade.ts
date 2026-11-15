@@ -214,8 +214,14 @@ export async function executeSwap(opts: {
       let expectedOut = 0;
       let guaranteedOut = 0;
       for (const sl of slices) {
-        const tin = metaOf(sl.tokenIn, book);
-        const tout = metaOf(sl.tokenOut, book);
+        const tin = metaOf(
+          sl.tokenInContract ? `${sl.tokenIn}@${sl.tokenInContract}` : sl.tokenIn,
+          book,
+        );
+        const tout = metaOf(
+          sl.tokenOutContract ? `${sl.tokenOut}@${sl.tokenOutContract}` : sl.tokenOut,
+          book,
+        );
         const quote = await fetchAlcorRouteCached({
           tokenInId: tin.alcorId,
           tokenOutId: tout.alcorId,

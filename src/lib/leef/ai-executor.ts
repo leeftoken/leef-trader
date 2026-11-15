@@ -54,7 +54,7 @@ export const AI_QID = {
   riskExecute: "risk_execute",
 } as const;
 
-const AI_ACTIONS: AiAction[] = ["hold", "buy", "sell", "swap", "reduce_risk"];
+const AI_ACTIONS: AiAction[] = ["hold", "buy", "sell", "reduce_risk"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
@@ -146,28 +146,17 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
         hold: "Do nothing this cycle.",
         buy: `Enter/add a ${summary.base} position spending ${summary.quote}.`,
         sell: `Exit the full tracked ${summary.base} position into ${summary.quote}; partial exits are not supported.`,
-        swap: "Swap between two distinct tokens from the supplied closed candidate sets.",
         reduce_risk: "Cut exposure by exiting the full tracked position; partial exits are not supported.",
       },
     },
     [AI_QID.sizeBucket]: {
       type: "choice",
-      instructions: "IF a buy or swap action were selected, what fraction of the deployable input balance should be used? This answer does not size exits.",
+      instructions: "IF a buy action were selected, what fraction of the deployable quote balance should be used? This answer does not size exits.",
       criteria: {
         quarter: "25% — cautious clip.",
         half: "50% — moderate.",
         full: "100% — full size.",
       },
-    },
-    [AI_QID.swapTokenIn]: {
-      type: "choice",
-      instructions: "IF a swap action were taken, which token should be spent? Choose from `state.candidatesIn`.",
-      criteria: Object.fromEntries(summary.candidatesIn.map((t) => [t, `Spend ${t}.`])),
-    },
-    [AI_QID.swapTokenOut]: {
-      type: "choice",
-      instructions: "IF a swap action were taken, which token should be received? Choose from `state.candidatesOut`.",
-      criteria: Object.fromEntries(summary.candidatesOut.map((t) => [t, `Receive ${t}.`])),
     },
     [AI_QID.riskStress]: {
       type: "noul",

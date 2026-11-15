@@ -60,7 +60,6 @@ export function AiHelperSupervisor() {
           current.aiProposal?.proposalId !== proposalId ||
           current.aiHelperControl === "off" ||
           !current.aiEnabled ||
-          current.aiGatewayUrl !== gatewayUrl ||
           current.aiGatewayUrl !== gatewayUrl
         ) return;
 
@@ -77,7 +76,8 @@ export function AiHelperSupervisor() {
         if (
           current.aiProposal?.proposalId !== proposalId ||
           current.aiHelperControl === "off" ||
-          !current.aiEnabled
+          !current.aiEnabled ||
+          current.aiGatewayUrl !== gatewayUrl
         ) return;
         current.setAiHelperReview(null);
         const reason = err instanceof Error ? err.message.slice(0, 160) : "helper unavailable";

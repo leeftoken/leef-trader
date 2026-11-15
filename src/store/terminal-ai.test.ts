@@ -92,13 +92,13 @@ describe("aiHelperControl (strategic second-key review)", () => {
     const review = {
       candidateId: "jev:sample",
       snapshotFetchedAt: "2026-11-15T11:59:00.000Z",
-      decision: "approve",
+      decision: "approve" as const,
       confidence: 0.9,
-      riskFlags: [],
+      riskFlags: [] as string[],
       reason: "test",
       reviewedAt: Date.now(),
       model: "test",
-    } as const;
+    };
     useTerminal.getState().setAiHelperReview(review);
     expect(useTerminal.getState().aiHelperReview).toBe(review);
     useTerminal.getState().setAiHelperControl("off");

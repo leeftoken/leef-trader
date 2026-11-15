@@ -49,7 +49,7 @@ export type JournalEntry = {
   mode?: "paper" | "live";
 
   /** decision entries */
-  decision?: "buy" | "sell" | "swap" | "arb" | "hold" | "skip" | "stop" | "error";
+  decision?: "buy" | "sell" | "swap" | "arb" | "reduce_risk" | "hold" | "skip" | "stop" | "error";
   /** Human reason, capped at MAX_REASON_LEN. */
   reason?: string;
   priceUsd?: number;

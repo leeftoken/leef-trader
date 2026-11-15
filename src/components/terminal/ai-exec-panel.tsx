@@ -443,7 +443,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
-                  The helper will independently review each Jev buy/swap proposal. In combined
+                  The helper will independently review each exact Jev BUY candidate. In combined
                   CONTROL, both models must return fresh, candidate-matched approvals.
                 </p>
                 <p>

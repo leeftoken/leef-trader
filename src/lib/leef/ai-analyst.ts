@@ -1,12 +1,13 @@
 /**
  * AI analyst client — the LEEF Trader AI gateway (Cloudflare Worker → PPQ).
  *
- * HARD INVARIANT: the AI is an analyst, never the trading engine. This
- * module can read market/bot/evidence state and return commentary. It has
- * no path to signing, no input to the gates, and the worker itself forces
- * `"trade_authorization": false` in every response. If the gateway is down,
- * slow, or CORS-blocked, trading continues deterministically — nothing here
- * is on the trade path.
+ * HARD INVARIANT: the AI helper is a supervisory analyst, never the trading
+ * engine. It has no path to signing and the worker forces
+ * `"trade_authorization": false` in every response. In dual CONTROL, a
+ * strictly parsed, candidate-bound review may veto a Jev buy/swap proposal;
+ * it cannot create, size, route, authorize, sign, or submit a trade. Missing
+ * or malformed reviews fail closed for new exposure. Protective exits and
+ * deterministic execution gates remain independent of this service.
  *
  * Contract (see Leef-signer README):
  *   POST {url}/api/ai   { task, data }  → OpenAI-style chat completion,

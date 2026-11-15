@@ -47,6 +47,19 @@ function summary(): AiSnapshotSummary {
     ],
     candidateKind: "preview",
     candidateKey: "dry-run",
+    candidate: {
+      kind: "preview",
+      key: "dry-run",
+      tokenIn: "WAX",
+      tokenOut: "LEEF",
+      amountIn: 10,
+      amountUsd: 0.047,
+      expectedOut: 1_000_000,
+      expectedNetEdgePct: 1.2,
+      priceImpactPct: 0.2,
+      poolIds: [217],
+      hops: 1,
+    },
     allowedActions: ["hold", "buy", "swap"],
     candidatesIn: ["WAX", "LEEF"],
     candidatesOut: ["LEEF", "WAX", "WAXUSDC"],
@@ -111,6 +124,7 @@ describe("buildAiQuestions", () => {
     expect(s.market.dangerScore).toBe(10);
     expect(s.positionUnrealizedPct).toBe(6.25);
     expect(s.tokenUniverse).toContainEqual({ symbol: "LEEF", contract: "leefmaincorp" });
+    expect(s.candidate.expectedNetEdgePct).toBe(1.2);
   });
 });
 

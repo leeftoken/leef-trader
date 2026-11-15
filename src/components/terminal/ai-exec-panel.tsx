@@ -179,7 +179,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
           <div>
             <h2 className="text-lg font-semibold">AI trade control</h2>
             <p className="max-w-prose text-sm text-muted-foreground">
-              Jev (TypeSafe System One) judges; code decides. The AI executes{" "}
+              Jev (TypeSafe System One) reviews the engine's existing candidate; code decides. 
               <span className="font-medium text-foreground">
                 only when CONTROL is on and confidence ≥ {AI_EXEC_CONFIDENCE_MIN}
               </span>
@@ -189,36 +189,33 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
             </p>
           </div>
         </div>
-        <div
-          className="flex rounded-lg border border-border"
-          role="radiogroup"
-          aria-label="AI trade control mode"
-        >
-          {(
-            [
-              ["off", "OFF"],
-              ["suggest", "SUGGEST"],
-              ["control", "CONTROL"],
-            ] as const
-          ).map(([m, label]) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+            <span className="text-xs text-muted-foreground">Jev</span>
             <button
-              key={m}
               type="button"
-              role="radio"
-              aria-checked={mode === m}
-              onClick={() => selectMode(m)}
+              role="switch"
+              aria-label="Jev suggestions"
+              aria-checked={mode !== "off"}
+              onClick={() => selectMode(mode === "off" ? "suggest" : "off")}
               className={cn(
-                "px-2.5 py-1.5 text-xs transition-colors",
-                mode === m
-                  ? m === "control"
-                    ? "bg-warn/15 text-warn"
-                    : "bg-accent/15 text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                "min-w-14 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                mode !== "off" ? "bg-leef/15 text-leef" : "bg-surface-2 text-muted-foreground",
               )}
             >
-              {label}
+              {mode === "off" ? "OFF" : "ON"}
             </button>
-          ))}
+          </div>
+          {mode === "suggest" && (
+            <Button variant="outline" size="sm" onClick={() => selectMode("control")}>
+              Enable trade control
+            </Button>
+          )}
+          {mode === "control" && (
+            <Button variant="outline" size="sm" onClick={() => setMode("suggest")}>
+              Trade control ON · Turn off
+            </Button>
+          )}
         </div>
       </div>
 

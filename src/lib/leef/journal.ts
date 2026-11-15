@@ -207,6 +207,10 @@ export type StrategyEvidence = {
   paper: number;
   wins: number;
   pnlUsd: number;
+  liveWins: number;
+  livePnlUsd: number;
+  paperWins: number;
+  paperPnlUsd: number;
   predEdgePctSum: number;
   predN: number;
   realEdgePctSum: number;
@@ -265,6 +269,10 @@ function blankStrategyEvidence(strategy: string): StrategyEvidence {
     paper: 0,
     wins: 0,
     pnlUsd: 0,
+    liveWins: 0,
+    livePnlUsd: 0,
+    paperWins: 0,
+    paperPnlUsd: 0,
     predEdgePctSum: 0,
     predN: 0,
     realEdgePctSum: 0,
@@ -341,12 +349,22 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
         // rows must never contribute estimated router P&L or win counts.
         if (e.status === "confirmed") {
           s.confirmed += 1;
-          if ((e.pnlUsd ?? 0) > 0) s.wins += 1;
-          s.pnlUsd += e.pnlUsd ?? 0;
+          const pnl = e.pnlUsd ?? 0;
+          if (pnl > 0) s.wins += 1;
+          s.pnlUsd += pnl;
+          if (e.mode === "live") {
+            if (pnl > 0) s.liveWins += 1;
+            s.livePnlUsd += pnl;
+          }
         } else if (e.status === "paper") {
           s.paper += 1;
-          if ((e.pnlUsd ?? 0) > 0) s.wins += 1;
-          s.pnlUsd += e.pnlUsd ?? 0;
+          const pnl = e.pnlUsd ?? 0;
+          if (pnl > 0) s.wins += 1;
+          s.pnlUsd += pnl;
+          if (e.mode === "paper") {
+            if (pnl > 0) s.paperWins += 1;
+            s.paperPnlUsd += pnl;
+          }
         } else if (e.status === "unknown" || e.status === "included") {
           s.unknown += 1;
         }

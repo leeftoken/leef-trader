@@ -111,7 +111,7 @@ export interface AiSnapshotSummary {
     deepestPoolUsd: number;
     recentEconomicFailures: number;
   };
-  session: {
+  performance: {
     trades: number;
     wins: number;
     realizedUsd: number;
@@ -305,7 +305,7 @@ export function aiSummaryOf(
       deepestPoolUsd,
       recentEconomicFailures,
     },
-    session: {
+    performance: {
       trades: b.stats?.trades ?? 0,
       wins: b.stats?.wins ?? 0,
       realizedUsd: b.stats?.realizedUsd ?? 0,
@@ -521,7 +521,7 @@ export function parseAiProposal(
 /**
  * A live proposal must refer to a recent source snapshot, have arrived after
  * its request began, and have completed within the proxy's bounded timeout.
- * Missing metadata fails closed; old session/dry-run proposals cannot trade.
+ * Missing metadata fails closed; old cached/dry-run proposals cannot trade.
  */
 export function isAiProposalFresh(
   proposal: AiProposal | null | undefined,

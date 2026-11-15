@@ -156,7 +156,7 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
       criteria: {
         hold: "Do not execute; keep the deterministic candidate on hold.",
         buy: summary.engineCandidate
-          ? `Execute the exact engine-generated candidate ${summary.engineCandidate.tokenIn}→${summary.engineCandidate.tokenOut}, amount ${summary.engineCandidate.amountIn}; do not alter it.`
+          ? `Execute exact candidate ${summary.engineCandidate.tokenIn}→${summary.engineCandidate.tokenOut}, amount ${summary.engineCandidate.amountIn}, route ${summary.engineCandidate.routeSignature}, net edge ${summary.engineCandidate.netEdgePct ?? "unknown"}%, impact ${summary.engineCandidate.priceImpactPct.toFixed(3)}%; do not alter it.`
           : `Hypothetically consider entering ${summary.base} using ${summary.quote}; advisory only.`,
       },
     },

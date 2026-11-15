@@ -80,10 +80,10 @@ const context: AiProposalContext = {
   receivedAt: 105_000,
   model: "jev-latest",
   candidateKind: "buy",
-  candidateKey: "buy:WAX:LEEF:10:direct:217",
+  candidateKey: "auto:buy:WAX:LEEF",
   candidate: {
     kind: "buy",
-    key: "buy:WAX:LEEF:10:direct:217",
+    key: "auto:buy:WAX:LEEF",
     tokenIn: "WAX",
     tokenOut: "LEEF",
     amountIn: 10,
@@ -99,10 +99,10 @@ const context: AiProposalContext = {
 const swapContext: AiProposalContext = {
   ...context,
   candidateKind: "swap",
-  candidateKey: "swap:WAX:LEEF:10:direct:217",
+  candidateKey: "auto:swap:WAX:LEEF",
   candidate: {
     kind: "swap",
-    key: "swap:WAX:LEEF:10:direct:217",
+    key: "auto:swap:WAX:LEEF",
     tokenIn: "WAX",
     tokenOut: "LEEF",
     amountIn: 10,

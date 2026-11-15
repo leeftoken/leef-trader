@@ -51,7 +51,10 @@ export type StrategyPerf = {
 };
 
 export type BotStats = {
+  /** Submitted actions/executions; this is not the win-rate denominator. */
   trades: number;
+  /** Closed, settled outcomes with realized P&L. */
+  closedTrades: number;
   wins: number;
   realizedUsd: number;
   /** Volume maker: gross USD notional cycled through the books. */
@@ -167,6 +170,7 @@ type BotState = {
 
 const freshStats = (equityUsd: number): BotStats => ({
   trades: 0,
+  closedTrades: 0,
   wins: 0,
   realizedUsd: 0,
   volumeUsd: 0,
@@ -303,6 +307,7 @@ export const useBot = create<BotState>()(
           stats: {
             ...s.stats,
             realizedUsd: s.stats.realizedUsd + pnlUsd,
+            closedTrades: s.stats.closedTrades + 1,
             wins: s.stats.wins + (pnlUsd > 0 ? 1 : 0),
             lastPnlUsd: pnlUsd,
             equity: [...s.stats.equity, { t: Date.now(), usd: equityUsd }].slice(-120),

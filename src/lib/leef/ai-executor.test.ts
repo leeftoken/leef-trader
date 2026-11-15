@@ -59,7 +59,7 @@ describe("buildAiQuestions", () => {
     const q = buildAiQuestions(summary());
     expect(q[AI_QID.action]?.type).toBe("choice");
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "buy", "sell", "swap", "reduce_risk"]);
+    expect(Object.keys(criteria)).toEqual(["hold", "buy", "sell", "reduce_risk"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
     expect(q[AI_QID.riskExecute]?.type).toBe("noul");

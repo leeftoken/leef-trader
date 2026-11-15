@@ -57,6 +57,12 @@ export type BotStats = {
   closedTrades: number;
   wins: number;
   realizedUsd: number;
+  liveClosedTrades: number;
+  liveWins: number;
+  liveRealizedUsd: number;
+  paperClosedTrades: number;
+  paperWins: number;
+  paperRealizedUsd: number;
   /** Volume maker: gross USD notional cycled through the books. */
   volumeUsd: number;
   /** Volume maker: net USD cost of echo round trips (negative = profit). */
@@ -143,7 +149,7 @@ type BotState = {
   setPosition: (p: Position | null) => void;
   setGridAnchor: (usd: number | null) => void;
   bumpPositionHigh: (usd: number) => void;
-  recordResult: (pnlUsd: number, equityUsd: number) => void;
+  recordResult: (pnlUsd: number, equityUsd: number, mode: "live" | "paper") => void;
   recordVolume: (volumeUsd: number, costUsd: number) => void;
   /** Calibration: record one closed trade under the strategy that opened it.
    *  `mode` splits paper fills from live — paper never touches live calibration. */
@@ -173,6 +179,12 @@ const freshStats = (equityUsd: number): BotStats => ({
   closedTrades: 0,
   wins: 0,
   realizedUsd: 0,
+  liveClosedTrades: 0,
+  liveWins: 0,
+  liveRealizedUsd: 0,
+  paperClosedTrades: 0,
+  paperWins: 0,
+  paperRealizedUsd: 0,
   volumeUsd: 0,
   echoCostUsd: 0,
   lastPnlUsd: 0,
@@ -302,13 +314,27 @@ export const useBot = create<BotState>()(
             ? { position: { ...s.position, highUsd: usd } }
             : {},
         ),
-      recordResult: (pnlUsd, equityUsd) =>
+      recordResult: (pnlUsd, equityUsd, mode) =>
         set((s) => ({
           stats: {
             ...s.stats,
-            realizedUsd: s.stats.realizedUsd + pnlUsd,
-            closedTrades: s.stats.closedTrades + 1,
-            wins: s.stats.wins + (pnlUsd > 0 ? 1 : 0),
+            // Combined totals remain useful for wallet-wide session context.
+            // Mode-specific totals prevent a paper win being shown as live P&L.
+            realizedUsd: (s.stats.realizedUsd ?? 0) + pnlUsd,
+            closedTrades: (s.stats.closedTrades ?? 0) + 1,
+            wins: (s.stats.wins ?? 0) + (pnlUsd > 0 ? 1 : 0),
+            liveClosedTrades:
+              (s.stats.liveClosedTrades ?? 0) + (mode === "live" ? 1 : 0),
+            liveWins:
+              (s.stats.liveWins ?? 0) + (mode === "live" && pnlUsd > 0 ? 1 : 0),
+            liveRealizedUsd:
+              (s.stats.liveRealizedUsd ?? 0) + (mode === "live" ? pnlUsd : 0),
+            paperClosedTrades:
+              (s.stats.paperClosedTrades ?? 0) + (mode === "paper" ? 1 : 0),
+            paperWins:
+              (s.stats.paperWins ?? 0) + (mode === "paper" && pnlUsd > 0 ? 1 : 0),
+            paperRealizedUsd:
+              (s.stats.paperRealizedUsd ?? 0) + (mode === "paper" ? pnlUsd : 0),
             lastPnlUsd: pnlUsd,
             equity: [...s.stats.equity, { t: Date.now(), usd: equityUsd }].slice(-120),
           },

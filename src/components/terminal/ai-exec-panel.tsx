@@ -22,6 +22,7 @@ import {
   type AiSnapshotSummary,
 } from "@/lib/leef/ai-executor";
 import { askJev } from "@/lib/leef/jev-client";
+import { AI_HELPER_REVIEW_CONFIDENCE_MIN } from "@/lib/leef/ai-helper-control";
 import { journal } from "@/lib/leef/journal";
 import { toast } from "@/hooks/useToast";
 import { fmtNum } from "@/lib/leef/format";
@@ -183,13 +184,11 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
           <div>
             <h2 className="text-lg font-semibold">AI trade control</h2>
             <p className="max-w-prose text-sm text-muted-foreground">
-              Jev (TypeSafe System One) judges; code decides. The AI executes{" "}
-              <span className="font-medium text-foreground">
-                only when CONTROL is on and confidence ≥ {AI_EXEC_CONFIDENCE_MIN}
-              </span>
-              , and every AI trade still passes all risk gates — freshness, bounds, size
-              ceiling, exact-quote verify, portfolio governor, resource preflight, policy
-              firewall and simulation — before anything is signed.
+              Jev (TypeSafe System One) proposes a trade; deterministic code retains final
+              authority. CONTROL requires Jev confidence ≥ {AI_EXEC_CONFIDENCE_MIN}. When the
+              strategic helper is also in CONTROL, it must separately approve each buy/swap.
+              Every trade still passes the existing freshness, sizing, quote, governor, resource,
+              policy and simulation gates before anything is signed.
             </p>
           </div>
         </div>
@@ -283,7 +282,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
                 <Badge
                   variant="outline"
                   className={cn(
-                    helperReview.decision === "approve" && helperReview.confidence >= 0.82 && helperReview.riskFlags.length === 0
+                    helperReview.decision === "approve" && helperReview.confidence >= AI_HELPER_REVIEW_CONFIDENCE_MIN && helperReview.riskFlags.length === 0
                       ? "border-leef/40 text-leef"
                       : "border-warn/40 text-warn",
                   )}

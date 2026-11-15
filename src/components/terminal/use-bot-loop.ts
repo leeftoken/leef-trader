@@ -133,9 +133,8 @@ function maybeKickAiPoll(
             model: res.model,
             candidateKind: summary.candidateKind,
             candidateKey: summary.candidateKey,
+            candidate: summary.candidate,
             allowedActions: summary.allowedActions,
-            candidatesIn: summary.candidatesIn,
-            candidatesOut: summary.candidatesOut,
           })
         : null;
       useTerminal.getState().setAiProposal(proposal);

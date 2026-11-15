@@ -59,7 +59,9 @@ export function AiHelperSupervisor() {
         if (
           current.aiProposal?.proposalId !== proposalId ||
           current.aiHelperControl === "off" ||
-          !current.aiEnabled
+          !current.aiEnabled ||
+          current.aiGatewayUrl !== gatewayUrl ||
+          current.aiGatewayUrl !== gatewayUrl
         ) return;
 
         current.setAiHelperReview(review);

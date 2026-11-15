@@ -130,12 +130,12 @@ describe("buildAiQuestions", () => {
   });
 
   it("offers swap as accept/reject only and never asks Jev to choose a token pair", () => {
-    const s = {
+    const s: AiSnapshotSummary = {
       ...summary(),
-      candidateKind: "swap" as const,
+      candidateKind: "swap",
       candidateKey: swapContext.candidateKey,
       candidate: swapContext.candidate,
-      allowedActions: ["hold", "swap"] as const,
+      allowedActions: ["hold", "swap"],
     };
     const q = buildAiQuestions(s);
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;

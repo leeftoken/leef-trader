@@ -7,7 +7,7 @@ import type { SwapRoute } from "@/lib/leef/types";
 import { refreshExecutionState } from "@/lib/market/execution-state";
 import { governTrade } from "@/lib/market/portfolio-governor";
 import type { LeefSnapshot } from "@/lib/leef/types";
-import { assetDelta } from "./reconcile";
+import { assetDelta, matchesExactDebit } from "./reconcile";
 import { signAndPushBatch, signAndPushSwap, type BatchLeg } from "./sign";
 import { coordinateCapitalMovement } from "./execution-coordinator";
 import { withTransientPreparationRetry } from "./retry-policy";
@@ -279,9 +279,7 @@ export async function executeSwap(opts: {
           if (settled.status !== "confirmed") return;
           const spent = assetDelta(settled.transfers, w.account, inMeta.symbol, inMeta.contract);
           const received = assetDelta(settled.transfers, w.account, outMeta.symbol, outMeta.contract);
-          const exactDebit =
-            spent < 0 &&
-            Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
+          const exactDebit = matchesExactDebit(spent, opts.amountIn, inMeta.decimals);
           if (!(exactDebit && received > 0)) markUnknown(settled.txid);
         },
       });
@@ -293,9 +291,7 @@ export async function executeSwap(opts: {
       if (rec.status === "confirmed") {
         const spent = assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
         const actual = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
-        const exactDebit =
-          spent < 0 &&
-          Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
+        const exactDebit = matchesExactDebit(spent, opts.amountIn, inMeta.decimals);
         if (exactDebit && actual > 0) {
           amountOut = actual;
           confirmed = true;

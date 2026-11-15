@@ -47,15 +47,15 @@ type TerminalState = {
   aiEnabled: boolean;
   /**
    * Jev (System One) execution authority. Default OFF = zero Jev calls.
-   * "suggest" = proposals surface on the AI desk only. "control" = a fresh
-   * proposal at/above the confidence floor becomes an execution candidate
-   * through the unchanged risk gauntlet. Persisted; granting "control"
-   * requires the explicit confirm step (UI risk dialog → confirmed: true).
+   * "suggest" = Jev reviews deterministic BUY candidates for the AI desk only.
+   * "control" = a fresh, sufficiently confident BUY approval enters the unchanged
+   * risk gauntlet. Unsupported SWAP/ARB engine actions pause. Persisted; granting
+   * "control" requires the explicit confirm step (UI risk dialog → confirmed: true).
    */
   aiControl: "off" | "suggest" | "control";
   /**
-   * Strategic AI helper mode. In CONTROL it is an independent model review
-   * for Jev BUY proposals; it cannot create or execute trades.
+   * Strategic AI helper mode. In CONTROL it is an independent review of exact
+   * Jev BUY proposals; it cannot create, size, route, or execute trades.
    */
   aiHelperControl: "off" | "suggest" | "control";
   /** Latest Jev proposal for the AI desk (ephemeral — never persisted). */

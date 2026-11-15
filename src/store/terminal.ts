@@ -54,8 +54,8 @@ type TerminalState = {
    */
   aiControl: "off" | "suggest" | "control";
   /**
-   * Strategic AI helper mode. In CONTROL it is a second-key supervisor for
-   * risk-increasing Jev proposals; it cannot create or execute trades.
+   * Strategic AI helper mode. In CONTROL it is an independent model review
+   * for Jev BUY proposals; it cannot create or execute trades.
    */
   aiHelperControl: "off" | "suggest" | "control";
   /** Latest Jev proposal for the AI desk (ephemeral — never persisted). */

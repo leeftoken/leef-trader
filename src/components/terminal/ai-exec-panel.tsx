@@ -119,7 +119,7 @@ function swapPrefill(
 const MODE_COPY: Record<AiControlMode, string> = {
   off: "Zero Jev calls leave this browser.",
   suggest: "Jev proposals are advisory — you apply them by hand.",
-  control: `Jev may approve deterministic BUY candidates at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN} — through every risk gate.`,
+  control: `Jev may approve deterministic BUY candidates at confidence ≥ ${AI_EXEC_CONFIDENCE_MIN}; unsupported SWAP/ARB actions pause.`,
 };
 
 export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
@@ -201,7 +201,9 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
               deterministic engine. It can approve that candidate or choose HOLD, and can only
               reduce its size. CONTROL requires confidence ≥ {AI_EXEC_CONFIDENCE_MIN}. With the
               strategic helper also in CONTROL, both models must approve the same candidate.
-              The engine retains route and risk authority; the full execution gauntlet remains.
+              SWAP and ARB engine actions pause in Jev CONTROL until they receive their own
+              review contract. The engine retains route and risk authority; the full execution
+              gauntlet remains.
             </p>
           </div>
         </div>

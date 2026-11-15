@@ -651,9 +651,9 @@ async function runBotOnceInner(
         : {};
   const candidateKey =
     decision.kind === "buy"
-      ? `${b.strategy}:buy:${b.quote || "WAX"}:${b.base || "LEEF"}`
+      ? `${b.strategy}:buy:${b.quote || "WAX"}:${b.base || "LEEF"}:${routeSignature(decision.route)}`
       : decision.kind === "swap"
-        ? `${b.strategy}:swap:${decision.tokenIn}:${decision.tokenOut}`
+        ? `${b.strategy}:swap:${decision.tokenIn}:${decision.tokenOut}:${routeSignature(decision.route)}`
         : "other";
   // Jev judges the existing strategy/token-pair candidate. It cannot invent
   // another trade type or token pair; route selection remains engine-owned.

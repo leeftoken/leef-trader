@@ -36,7 +36,7 @@ function summary(): AiSnapshotSummary {
       deepestPoolUsd: 900,
       recentEconomicFailures: 0,
     },
-    session: { trades: 4, wins: 3, realizedUsd: 0.12, tradesThisHour: 1, startEquityUsd: 10 },
+    performance: { trades: 4, wins: 3, realizedUsd: 0.12, tradesThisHour: 1, startEquityUsd: 10 },
     riskLimits: { maxPositionUsd: 50, minNetEdgePct: 0.4, maxImpactPct: 2, maxQuoteAgeSec: 45 },
     topPools: [
       { id: 217, pair: "LEEF/WAX", feePct: 0.3, tvlUsd: 900, volume24Usd: 6.6, change24: 1.2 },

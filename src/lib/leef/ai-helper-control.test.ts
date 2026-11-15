@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AI_HELPER_REVIEW_CONFIDENCE_MIN,
   evaluateAiHelperReview,
+  isAiProposalFresh,
   parseAiHelperReview,
   type AiHelperCandidate,
 } from "./ai-helper-control";
@@ -68,6 +69,27 @@ describe("parseAiHelperReview", () => {
     ).toBe("abstain");
   });
 });
+
+
+  it("rejects Jev proposals with invalid, stale, or future source timestamps", () => {
+    const freshProposal = {
+      fetchedAt: now - 1_000,
+      snapshotFetchedAt: new Date(now - 10_000).toISOString(),
+    };
+    expect(isAiProposalFresh(freshProposal, now)).toBe(true);
+    expect(isAiProposalFresh({
+      ...freshProposal,
+      snapshotFetchedAt: new Date(now - 120_000).toISOString(),
+    }, now)).toBe(false);
+    expect(isAiProposalFresh({
+      ...freshProposal,
+      fetchedAt: now + 10_000,
+    }, now)).toBe(false);
+    expect(isAiProposalFresh({
+      ...freshProposal,
+      snapshotFetchedAt: "not-a-date",
+    }, now)).toBe(false);
+  });
 
 describe("evaluateAiHelperReview", () => {
   it("requires a fresh high-confidence approval with no risk flags for entries", () => {

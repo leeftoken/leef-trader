@@ -8,7 +8,7 @@
  */
 import { classifyRegime, dangerScore } from "./regime";
 import type { JevAnswers, JevQuestion } from "./jev-client";
-import type { LeefSnapshot } from "./types";
+import { snapFreshAtMs, type LeefSnapshot } from "./types";
 
 export type AiAction = "hold" | "buy" | "sell" | "swap" | "reduce_risk";
 
@@ -163,7 +163,11 @@ export function aiSummaryOf(
 
   const poolPricesUsd = snap.pools.map((p) => p.usdPerLeef ?? 0).filter((v) => v > 0);
   const regime = classifyRegime({ series: b.series ?? [], poolPricesUsd });
-  const quoteAgeMsRaw = Date.now() - Date.parse(snap.fetchedAt);
+  const freshestAtMs = snapFreshAtMs(snap);
+  const freshestAt = Number.isFinite(freshestAtMs)
+    ? new Date(freshestAtMs).toISOString()
+    : snap.fetchedAt;
+  const quoteAgeMsRaw = Date.now() - freshestAtMs;
   const quoteAgeMs = Number.isFinite(quoteAgeMsRaw) ? Math.max(0, quoteAgeMsRaw) : 2_147_483_647;
   const recentEconomicFailures = (b.decisions ?? []).filter((d) => {
     const at = Date.parse(d.t);
@@ -213,7 +217,7 @@ export function aiSummaryOf(
     waxUsd: snap.waxUsd,
     leefUsd: snap.leefUsd,
     waxPerLeef: snap.waxPerLeef,
-    fetchedAt: snap.fetchedAt,
+    fetchedAt: freshestAt,
     base,
     quote,
     strategy: b.strategy,

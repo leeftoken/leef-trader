@@ -207,8 +207,20 @@ export function aiSummaryOf(
     recentFailures: recentEconomicFailures,
   });
 
+  // Bound prompt size: include the ten deepest primary pools plus every
+  // pool on the current candidate route, and a small aux sample. Never ship
+  // the full discovery universe to Jev.
+  const candidatePoolIds = new Set(candidateDetails.poolIds ?? []);
+  const topPoolIds = new Set(
+    [...snap.pools]
+      .sort((a, c) => c.tvlUsd - a.tvlUsd)
+      .slice(0, 10)
+      .map((p) => p.id),
+  );
+  const topAuxIds = new Set(snap.aux.slice(0, 10).map((p) => p.id));
   const tokenMap = new Map<string, { symbol: string; contract: string }>();
   for (const p of snap.pools) {
+    if (!candidatePoolIds.has(p.id) && !topPoolIds.has(p.id)) continue;
     for (const token of [p.leef, p.pair]) {
       const symbol = token.symbol.toUpperCase();
       const contract = token.contract.toLowerCase();
@@ -216,6 +228,7 @@ export function aiSummaryOf(
     }
   }
   for (const p of snap.aux) {
+    if (!candidatePoolIds.has(p.id) && !topAuxIds.has(p.id)) continue;
     for (const token of [p.tokenA, p.tokenB]) {
       const symbol = token.symbol.toUpperCase();
       const contract = token.contract.toLowerCase();

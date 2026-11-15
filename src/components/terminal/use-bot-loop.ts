@@ -804,10 +804,20 @@ async function runBotOnceInner(
     const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
     const tag = `AI · Jev accepted ${fresh.candidateKind} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;
     if (fresh.action === "buy" && decision.kind === "buy") {
-      const probeIn = Math.min(bounds.maxIn, Math.max(bounds.minIn, decision.amountIn * sizePct));
-      const route = bestExecutionRoute(book.pools, book.aux, probeIn, quoteTok, baseTok);
+      // Jev's bucket is a HARD CAP on the engine candidate, never a request
+      // to increase it. If the selected fraction falls below minTrade, sit out.
+      const jevMaxIn = Math.min(bounds.maxIn, decision.amountIn * sizePct);
+      if (jevMaxIn + 1e-12 < bounds.minIn) {
+        return aiHold("AI control: Jev size bucket falls below the deterministic minimum trade — candidate paused");
+      }
+      bounds = {
+        ...bounds,
+        maxIn: jevMaxIn,
+        effectiveMaxUsd: Math.min(bounds.effectiveMaxUsd, jevMaxIn * bounds.quoteUsd),
+      };
+      const route = bestExecutionRoute(book.pools, book.aux, jevMaxIn, quoteTok, baseTok);
       if (!route) return aiHold("AI control: accepted buy candidate has no executable route on the refreshed book");
-      decision = { kind: "buy", amountIn: probeIn, route, reason: tag, confidence: fresh.confidence };
+      decision = { kind: "buy", amountIn: jevMaxIn, route, reason: tag, confidence: fresh.confidence };
     } else if (fresh.action === "swap" && decision.kind === "swap") {
       const tokenIn = decision.tokenIn;
       const tokenOut = decision.tokenOut;

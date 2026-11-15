@@ -64,6 +64,9 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
     requestedAt: at,
     receivedAt,
     model: res.model,
+    candidateKind: summary.candidateKind,
+    candidateKey: summary.candidateKey,
+    allowedActions: summary.allowedActions,
     candidatesIn: summary.candidatesIn,
     candidatesOut: summary.candidatesOut,
   });
@@ -99,12 +102,6 @@ function swapPrefill(
   if (p.action === "buy") {
     const amount = (balances[quote] ?? 0) * sizePct;
     return amount > 0 ? { tokenIn: quote, tokenOut: base, amountIn: String(amount) } : null;
-  }
-  if (p.action === "sell" || p.action === "reduce_risk") {
-    // Full tracked position — AI exits are always full (no partial-exit
-    // accounting), so the desk prefill matches what CONTROL would trade.
-    const amount = b.position?.amountLeef ?? 0;
-    return amount > 0 ? { tokenIn: base, tokenOut: quote, amountIn: String(amount) } : null;
   }
   if (p.action === "swap") {
     const tokenIn = p.params.tokenIn;
@@ -155,7 +152,7 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
     setBusy(true);
     try {
       const run = await runJevDryRun(
-        aiSummaryOf(snap, useBot.getState(), useWallet.getState().balances()),
+        aiSummaryOf(snap, useBot.getState(), useWallet.getState().balances(), "preview", "dry-run"),
       );
       setRuns((prev) => [run, ...prev].slice(0, 20));
     } finally {

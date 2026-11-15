@@ -4,6 +4,7 @@ import {
   AI_QID,
   buildAiQuestions,
   parseAiProposal,
+  isAiControlActionSupported,
   type AiSnapshotSummary,
 } from "./ai-executor";
 import type { JevAnswers } from "./jev-client";
@@ -162,5 +163,19 @@ describe("parseAiProposal", () => {
 
   it("exposes the documented execution gate constant", () => {
     expect(AI_EXEC_CONFIDENCE_MIN).toBe(0.75);
+  });
+});
+
+describe("Jev CONTROL engine-action policy", () => {
+  it("permits reviewed BUY, engine-protective SELL/STOP, and HOLD", () => {
+    expect(isAiControlActionSupported("buy")).toBe(true);
+    expect(isAiControlActionSupported("sell")).toBe(true);
+    expect(isAiControlActionSupported("stop")).toBe(true);
+    expect(isAiControlActionSupported("hold")).toBe(true);
+  });
+
+  it("blocks unsupported SWAP and ARB actions instead of bypassing AI review", () => {
+    expect(isAiControlActionSupported("swap")).toBe(false);
+    expect(isAiControlActionSupported("arb")).toBe(false);
   });
 });

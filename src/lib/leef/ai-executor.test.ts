@@ -60,9 +60,7 @@ function summary(): AiSnapshotSummary {
       poolIds: [217],
       hops: 1,
     },
-    allowedActions: ["hold", "buy", "swap"],
-    candidatesIn: ["WAX", "LEEF"],
-    candidatesOut: ["LEEF", "WAX", "WAXUSDC"],
+    allowedActions: ["hold", "buy"],
   };
 }
 
@@ -70,8 +68,6 @@ function answers(over: Partial<JevAnswers> = {}): JevAnswers {
   return {
     [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.9 },
     [AI_QID.sizeBucket]: { type: "choice", choice: "half", confidence: 0.8 },
-    [AI_QID.swapTokenIn]: { type: "choice", choice: "WAX", confidence: 0.7 },
-    [AI_QID.swapTokenOut]: { type: "choice", choice: "LEEF", confidence: 0.7 },
     [AI_QID.riskStress]: { type: "noul", noul: 0.1 },
     [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
     ...over,
@@ -84,15 +80,38 @@ const context: AiProposalContext = {
   receivedAt: 105_000,
   model: "jev-latest",
   candidateKind: "buy",
-  candidateKey: "buy:WAX:LEEF:direct:217",
+  candidateKey: "buy:WAX:LEEF:10:direct:217",
+  candidate: {
+    kind: "buy",
+    key: "buy:WAX:LEEF:10:direct:217",
+    tokenIn: "WAX",
+    tokenOut: "LEEF",
+    amountIn: 10,
+    amountUsd: 0.047,
+    expectedOut: 1_000_000,
+    expectedNetEdgePct: 1.2,
+    priceImpactPct: 0.2,
+    poolIds: [217],
+    hops: 1,
+  },
   allowedActions: ["hold", "buy"],
-  candidatesIn: ["WAX", "LEEF"],
-  candidatesOut: ["LEEF", "WAX", "WAXUSDC"],
 };
 const swapContext: AiProposalContext = {
   ...context,
   candidateKind: "swap",
-  candidateKey: "swap:WAX:LEEF:direct:217",
+  candidateKey: "swap:WAX:LEEF:10:direct:217",
+  candidate: {
+    kind: "swap",
+    key: "swap:WAX:LEEF:10:direct:217",
+    tokenIn: "WAX",
+    tokenOut: "LEEF",
+    amountIn: 10,
+    amountUsd: 0.047,
+    expectedOut: 1_000_000,
+    priceImpactPct: 0.2,
+    poolIds: [217],
+    hops: 1,
+  },
   allowedActions: ["hold", "swap"],
 };
 
@@ -100,22 +119,25 @@ describe("buildAiQuestions", () => {
   it("offers only the action types allowed for the exact deterministic candidate", () => {
     const q = buildAiQuestions(summary());
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "buy", "swap"]);
+    expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
-    expect(q[AI_QID.swapTokenIn]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
     expect(q[AI_QID.riskExecute]?.type).toBe("noul");
-    const tin = (q[AI_QID.swapTokenIn] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(tin)).toEqual(["WAX", "LEEF"]);
   });
 
-  it("does not offer swap arguments or unrelated actions for a buy candidate", () => {
-    const s = { ...summary(), candidateKind: "buy" as const, allowedActions: ["hold", "buy"] as const };
+  it("offers swap as accept/reject only and never asks Jev to choose a token pair", () => {
+    const s = {
+      ...summary(),
+      candidateKind: "swap" as const,
+      candidateKey: swapContext.candidateKey,
+      candidate: swapContext.candidate,
+      allowedActions: ["hold", "swap"] as const,
+    };
     const q = buildAiQuestions(s);
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
-    expect(q[AI_QID.swapTokenIn]).toBeUndefined();
-    expect(q[AI_QID.swapTokenOut]).toBeUndefined();
+    expect(Object.keys(criteria)).toEqual(["hold", "swap"]);
+    expect(q[AI_QID.swapTokenIn as keyof typeof q]).toBeUndefined();
+    expect(q[AI_QID.swapTokenOut as keyof typeof q]).toBeUndefined();
   });
 
   it("includes engine-owned market regime, danger, portfolio and contract context", () => {
@@ -140,6 +162,7 @@ describe("parseAiProposal", () => {
     expect(p!.snapshotFetchedAt).toBe(context.snapshotFetchedAt);
     expect(p!.model).toBe("jev-latest");
     expect(p!.candidateKey).toBe(context.candidateKey);
+    expect(p!.candidate?.expectedNetEdgePct).toBe(1.2);
   });
 
   it("allows Jev to reject a candidate with hold", () => {
@@ -192,7 +215,7 @@ describe("parseAiProposal", () => {
     }, context)).toBeNull();
   });
 
-  it("swap requires the matching swap candidate and distinct closed-set token args", () => {
+  it("accepts only the exact swap pair supplied by the engine", () => {
     const p = parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
@@ -200,22 +223,19 @@ describe("parseAiProposal", () => {
     expect(p).not.toBeNull();
     expect(p!.params.tokenIn).toBe("WAX");
     expect(p!.params.tokenOut).toBe("LEEF");
-    expect(p!.confidence).toBeCloseTo(0.7, 6);
-    expect(p!.weakest).toBe(AI_QID.swapTokenIn);
+    expect(p!.candidate?.tokenIn).toBe("WAX");
+    expect(p!.candidate?.tokenOut).toBe("LEEF");
+  });
 
-    const same = parseAiProposal({
+  it("rejects an incomplete swap candidate instead of accepting model-invented tokens", () => {
+    const incomplete = {
+      ...swapContext,
+      candidate: { kind: "swap" as const, key: "bad-candidate" },
+    };
+    expect(parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-      [AI_QID.swapTokenOut]: { type: "choice", choice: "WAX", confidence: 0.9 },
-    }, swapContext);
-    expect(same).toBeNull();
-
-    const invented = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-      [AI_QID.swapTokenOut]: { type: "choice", choice: "FAKE", confidence: 0.9 },
-    }, swapContext);
-    expect(invented).toBeNull();
+    }, incomplete)).toBeNull();
   });
 
   it("unknown size bucket is unusable", () => {

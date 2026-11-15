@@ -77,6 +77,9 @@ export type QuoteLeg = {
   pairName: string;
   tokenIn: string;
   tokenOut: string;
+  /** Exact Antelope contract identity for duplicate-symbol safety. */
+  tokenInContract?: string;
+  tokenOutContract?: string;
   amountIn: number;
   amountOut: number;
   feePct: number;
@@ -94,6 +97,9 @@ export type SwapRoute = {
   amountOut: number;
   tokenIn: string;
   tokenOut: string;
+  /** Exact contract identity of the route endpoints. */
+  tokenInContract?: string;
+  tokenOutContract?: string;
   feePct: number;
   priceImpact: number;
   executionPrice: number;

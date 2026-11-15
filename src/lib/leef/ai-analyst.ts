@@ -4,7 +4,7 @@
  * HARD INVARIANT: the AI helper is a supervisory analyst, never the trading
  * engine. It has no path to signing and the worker forces
  * `"trade_authorization": false` in every response. In dual CONTROL, a
- * strictly parsed, candidate-bound review may veto a Jev buy/swap proposal;
+ * strictly parsed, candidate-bound review may veto a Jev BUY proposal;
  * it cannot create, size, route, authorize, sign, or submit a trade. Missing
  * or malformed reviews fail closed for new exposure. Protective exits and
  * deterministic execution gates remain independent of this service.

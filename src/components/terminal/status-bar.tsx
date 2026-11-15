@@ -35,8 +35,10 @@ export function StatusBar({
   const h = headline(ranked);
   const stats = marketStats(snap);
   const synced = relTime(snap.fetchedAt, now);
-  const snapshotAgeSec = Math.max(0, (now - snapFreshAtMs(snap)) / 1000);
-  const snapshotFresh = Number.isFinite(snapshotAgeSec) && snapshotAgeSec <= 45;
+  const rawSnapshotAgeSec = (now - snapFreshAtMs(snap)) / 1000;
+  const snapshotAgeSec = Math.max(0, rawSnapshotAgeSec);
+  const snapshotFresh =
+    Number.isFinite(rawSnapshotAgeSec) && rawSnapshotAgeSec >= 0 && rawSnapshotAgeSec <= 45;
   const marketDataState =
     snap.source === "unavailable"
       ? "NO DATA"
@@ -52,6 +54,7 @@ export function StatusBar({
   const blockFresh = blockAgeSec != null && blockAgeSec < 5;
   const bestRpc = engine.rpc[0];
   const spotAgeMs = engine.snapshot?.spotAt ? now - Date.parse(engine.snapshot.spotAt) : null;
+  const spotFresh = spotAgeMs != null && Number.isFinite(spotAgeMs) && spotAgeMs >= 0 && spotAgeMs < 30_000;
   const route = tick.bestRoute;
   const conversion = route && route.amountIn > 0 ? route.amountOut / route.amountIn : 0;
 
@@ -137,7 +140,7 @@ export function StatusBar({
               <span className="text-warn">connecting…</span>
             )}
           </span>
-          {spotAgeMs != null && spotAgeMs < 30_000 && (
+          {spotFresh && spotAgeMs != null && (
             <span className="hidden font-mono tabular-nums text-accent md:inline">
               ◆ chain spot {(spotAgeMs / 1000).toFixed(0)}s
             </span>

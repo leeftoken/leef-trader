@@ -131,8 +131,10 @@ describe("token catalog + metaOf", () => {
     expect(metaOf("usdt-wrap.alcor").contract).toBe("wrap.alcor");
   });
 
-  it("bare USDT stays legacy usdt.alcor; bare USDC is wrap.alcor", () => {
-    expect(metaOf("USDT").contract).toBe("usdt.alcor");
+  it("requires an explicit contract for duplicate USDT; bare USDC stays unambiguous", () => {
+    expect(() => metaOf("USDT")).toThrow(/ambiguous/i);
+    expect(metaOf("USDT@usdt.alcor").contract).toBe("usdt.alcor");
+    expect(metaOf("USDT@wrap.alcor").contract).toBe("wrap.alcor");
     expect(metaOf("USDC").contract).toBe("wrap.alcor");
   });
 

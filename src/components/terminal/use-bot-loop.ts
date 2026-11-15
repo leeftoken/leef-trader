@@ -49,6 +49,7 @@ import {
   aiSummaryOf,
   buildAiQuestions,
   parseAiProposal,
+  isAiControlActionSupported,
   type AiProposal,
   type AiEngineCandidate,
 } from "@/lib/leef/ai-executor";
@@ -728,6 +729,17 @@ async function runBotOnceInner(
   }
   holdStreak = 0;
   lastHoldReason = "";
+
+  if (
+    !opts?.dry &&
+    useTerminal.getState().aiControl === "control" &&
+    !isAiControlActionSupported(decision.kind)
+  ) {
+    const reason = `AI CONTROL: ${decision.kind.toUpperCase()} is not yet covered by the Jev candidate-review contract — action paused`;
+    b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
+    b.setLastReason(reason);
+    return { kind: "hold", reason };
+  }
 
   if (decision.kind === "stop") {
     b.pushDecision({ kind: "stop", mode, reason: decision.reason, priceUsd: snap.leefUsd });

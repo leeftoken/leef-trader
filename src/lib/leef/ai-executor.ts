@@ -61,6 +61,18 @@ const AI_ACTIONS: AiAction[] = ["hold", "buy"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
+/** One deterministic BUY candidate; Jev can confirm or reject it, never replace it. */
+export interface AiEngineCandidate {
+  id: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: number;
+  routeSignature: string;
+  netEdgePct: number | null;
+  priceImpactPct: number;
+  reason: string;
+}
+
 /** Terse market/account summary sent as Jev `state`. No secrets, no keys. */
 export interface AiSnapshotSummary {
   waxUsd: number;
@@ -82,16 +94,7 @@ export interface AiSnapshotSummary {
     change24: number;
   }[];
   /** Present only when the deterministic engine has a viable BUY opportunity. */
-  engineCandidate?: {
-    id: string;
-    tokenIn: string;
-    tokenOut: string;
-    amountIn: number;
-    routeSignature: string;
-    netEdgePct: number | null;
-    priceImpactPct: number;
-    reason: string;
-  };
+  engineCandidate?: AiEngineCandidate;
 }
 
 /** Structural bot slice for summary building — avoids a store import here. */

@@ -57,6 +57,15 @@ export const AI_QID = {
 
 const AI_ACTIONS: AiAction[] = ["hold", "buy"];
 
+/** Actions permitted to reach execution while Jev CONTROL is active. */
+export type AiControlEngineAction = "buy" | "sell" | "swap" | "arb" | "hold" | "stop";
+
+export function isAiControlActionSupported(action: AiControlEngineAction): boolean {
+  // BUY has the candidate-bound Jev review; SELL/STOP remain engine-protective;
+  // HOLD is a no-op. SWAP/ARB need their own review contracts before support.
+  return action === "buy" || action === "sell" || action === "hold" || action === "stop";
+}
+
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
 /** One deterministic BUY candidate; Jev can confirm or reject it, never replace it. */

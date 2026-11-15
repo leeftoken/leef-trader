@@ -164,16 +164,45 @@ export const useTerminal = create<TerminalState>()(
   setSwapMaxHops: (n) =>
     set({ swapMaxHops: Math.min(10, Math.max(1, Math.round(n))), selectedRouteSig: null }),
   selectRoute: (selectedRouteSig) => set({ selectedRouteSig }),
-  setAiEnabled: (aiEnabled) => set({ aiEnabled }),
+  setAiEnabled: (aiEnabled) =>
+    set(aiEnabled
+      ? { aiEnabled: true }
+      : { aiEnabled: false, aiHelperControl: "off", aiHelperReview: null }),
   setAiControl: (mode, confirmed) => {
     if (mode === "control" && get().aiControl !== "control" && confirmed !== true) {
       return false; // explicit risk-confirm required to grant control
     }
-    // A stale proposal must never outlive the mode that produced it.
-    set(mode === get().aiControl ? { aiControl: mode } : { aiControl: mode, aiProposal: null });
+    const state = get();
+    const helperMode =
+      mode === "off"
+        ? "off"
+        : state.aiHelperControl === "control" && mode !== "control"
+          ? "suggest"
+          : state.aiHelperControl;
+    set({
+      aiControl: mode,
+      aiProposal: mode === state.aiControl ? state.aiProposal : null,
+      aiHelperControl: helperMode,
+      aiHelperReview: null,
+    });
+    return true;
+  },
+  setAiHelperControl: (mode, confirmed) => {
+    const state = get();
+    if (mode !== "off" && state.aiControl === "off") return false;
+    if (mode !== "off" && !state.aiEnabled) return false;
+    if (
+      mode === "control" &&
+      state.aiHelperControl !== "control" &&
+      (confirmed !== true || state.aiControl !== "control")
+    ) {
+      return false; // requires explicit confirmation and Jev CONTROL
+    }
+    set({ aiHelperControl: mode, aiHelperReview: null });
     return true;
   },
   setAiProposal: (aiProposal) => set({ aiProposal }),
+  setAiHelperReview: (aiHelperReview) => set({ aiHelperReview }),
   setFlowGuardEnabled: (flowGuardEnabled) => set({ flowGuardEnabled }),
   setLearningMode: (learningMode) => set({ learningMode }),
   setAiReviewEveryTrades: (n) =>

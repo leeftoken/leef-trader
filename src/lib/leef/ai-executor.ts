@@ -21,7 +21,19 @@ export interface AiProposal {
   weakest: string;
   answers: JevAnswers;
   rationale: string;
+  /** Unique identity bound to the exact source snapshot and proposal arguments. */
+  proposalId: string;
+  snapshotFetchedAt: string;
+  model: string;
   fetchedAt: number;
+}
+
+export interface AiProposalMetadata {
+  snapshotFetchedAt: string;
+  candidatesIn: readonly string[];
+  candidatesOut: readonly string[];
+  model: string;
+  receivedAt?: number;
 }
 
 /**
@@ -42,7 +54,7 @@ export const AI_QID = {
   riskExecute: "risk_execute",
 } as const;
 
-const AI_ACTIONS: AiAction[] = ["hold", "buy", "sell", "swap", "rebalance", "reduce_risk", "cancel_all"];
+const AI_ACTIONS: AiAction[] = ["hold", "buy", "sell", "swap", "reduce_risk"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
@@ -133,16 +145,14 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
       criteria: {
         hold: "Do nothing this cycle.",
         buy: `Enter/add a ${summary.base} position spending ${summary.quote}.`,
-        sell: `Exit part or all of the open ${summary.base} position into ${summary.quote}.`,
-        swap: "Swap between two held tokens (not the configured base/quote pair).",
-        rebalance: "Move value across tokens toward a balanced portfolio (advisory — executed by the rebalancer, not this loop).",
-        reduce_risk: "Cut exposure: exit the open position to reduce risk.",
-        cancel_all: "Cancel all resting intent and sit flat (no resting orders exist; this just holds).",
+        sell: `Exit the full tracked ${summary.base} position into ${summary.quote}; partial exits are not supported.`,
+        swap: "Swap between two distinct tokens from the supplied closed candidate sets.",
+        reduce_risk: "Cut exposure by exiting the full tracked position; partial exits are not supported.",
       },
     },
     [AI_QID.sizeBucket]: {
       type: "choice",
-      instructions: "IF a buy, sell or reduce_risk action were taken, what fraction of the relevant size (deployable quote balance for buys, open position for sells) should it use?",
+      instructions: "IF a buy or swap action were selected, what fraction of the deployable input balance should be used? This answer does not size exits.",
       criteria: {
         quarter: "25% — cautious clip.",
         half: "50% — moderate.",
@@ -191,7 +201,8 @@ function choiceOf(
   const a = answers[qid];
   if (!a || a.type !== "choice" || typeof a.choice !== "string") return null;
   if (typeof a.confidence !== "number" || !Number.isFinite(a.confidence)) return null;
-  return { choice: a.choice, confidence: Math.min(1, Math.max(0, a.confidence)) };
+  if (a.confidence < 0 || a.confidence > 1) return null;
+  return { choice: a.choice, confidence: a.confidence };
 }
 
 function noulOf(answers: JevAnswers, qid: string): number | null {
@@ -199,7 +210,8 @@ function noulOf(answers: JevAnswers, qid: string): number | null {
   if (!a || a.type !== "noul" || typeof a.noul !== "number" || !Number.isFinite(a.noul)) {
     return null;
   }
-  return Math.min(1, Math.max(0, a.noul));
+  if (a.noul < 0 || a.noul > 1) return null;
+  return a.noul;
 }
 
 /**
@@ -209,7 +221,10 @@ function noulOf(answers: JevAnswers, qid: string): number | null {
  * or the risk nouls contradict the action (unsafe-to-act data, or acute
  * stress against an entry).
  */
-export function parseAiProposal(answers: JevAnswers): AiProposal | null {
+export function parseAiProposal(
+  answers: JevAnswers,
+  metadata?: AiProposalMetadata,
+): AiProposal | null {
   if (!answers || typeof answers !== "object") return null;
   const actionAns = choiceOf(answers, AI_QID.action);
   if (!actionAns || !(AI_ACTIONS as string[]).includes(actionAns.choice)) return null;
@@ -231,6 +246,8 @@ export function parseAiProposal(answers: JevAnswers): AiProposal | null {
   if (action !== "hold") {
     // Acting on incoherent data is never usable.
     if (execOk < 0.5) return null;
+  }
+  if (action === "buy" || action === "swap") {
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
     params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);
@@ -245,6 +262,13 @@ export function parseAiProposal(answers: JevAnswers): AiProposal | null {
     const tin = choiceOf(answers, AI_QID.swapTokenIn);
     const tout = choiceOf(answers, AI_QID.swapTokenOut);
     if (!tin || !tout || tin.choice === tout.choice) return null;
+    // Live proposals must stay inside the exact closed sets sent in this
+    // request. This blocks invented or mismatched token arguments.
+    if (
+      !metadata ||
+      !metadata.candidatesIn.includes(tin.choice) ||
+      !metadata.candidatesOut.includes(tout.choice)
+    ) return null;
     params.tokenIn = tin.choice;
     params.tokenOut = tout.choice;
     judgments.push(
@@ -258,6 +282,21 @@ export function parseAiProposal(answers: JevAnswers): AiProposal | null {
   let weakest = judgments[0]!;
   for (const j of judgments) if (j.confidence < weakest.confidence) weakest = j;
 
+  const receivedAt = metadata?.receivedAt ?? Date.now();
+  const snapshotFetchedAt = metadata?.snapshotFetchedAt ?? new Date(receivedAt).toISOString();
+  const snapshotMs = Date.parse(snapshotFetchedAt);
+  if (!Number.isFinite(receivedAt) || !Number.isFinite(snapshotMs) || snapshotMs > receivedAt + 2_000) {
+    return null;
+  }
+  const proposalId = [
+    "jev",
+    snapshotMs,
+    action,
+    params.tokenIn ?? "",
+    params.tokenOut ?? "",
+    params.sizePct ?? "",
+  ].join(":");
+
   return {
     action,
     params,
@@ -265,6 +304,9 @@ export function parseAiProposal(answers: JevAnswers): AiProposal | null {
     weakest: weakest.qid,
     answers,
     rationale: rationale.join(" · "),
-    fetchedAt: Date.now(),
+    proposalId,
+    snapshotFetchedAt,
+    model: metadata?.model ?? "unknown",
+    fetchedAt: receivedAt,
   };
 }

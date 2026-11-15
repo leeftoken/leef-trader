@@ -99,16 +99,14 @@ function swapPrefill(
   const balances = useWallet.getState().balances();
   const sizePct = Math.min(100, Math.max(1, Number(p.params.sizePct ?? "100"))) / 100;
   if (p.action === "buy") {
-    const amount = (balances[quote] ?? 0) * sizePct;
+    const amount = (p.candidate?.amountIn ?? balances[quote] ?? 0) * sizePct;
     return amount > 0 ? { tokenIn: quote, tokenOut: base, amountIn: String(amount) } : null;
   }
   if (p.action === "swap") {
     const tokenIn = p.params.tokenIn;
     const tokenOut = p.params.tokenOut;
     if (!tokenIn || !tokenOut || tokenIn === tokenOut) return null;
-    const amountIn = Number(p.params.amountIn) > 0
-      ? Number(p.params.amountIn)
-      : (balances[tokenIn] ?? 0) * sizePct; // same derivation the seam uses
+    const amountIn = (p.candidate?.amountIn ?? balances[tokenIn] ?? 0) * sizePct;
     return amountIn > 0 ? { tokenIn, tokenOut, amountIn: String(amountIn) } : null;
   }
   return null;

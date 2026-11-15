@@ -1918,7 +1918,7 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
-      if (live && (execStatus === "confirmed" || execStatus === "included")) {
+      if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
           decision.route.poolIds[0],
@@ -2059,7 +2059,7 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
-      if (live && (execStatus === "confirmed" || execStatus === "included")) {
+      if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
           decision.route.poolIds[0],
@@ -2276,7 +2276,7 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: snap.waxUsd,
       });
-      if (live && (execStatus === "confirmed" || execStatus === "included")) {
+      if (live && execStatus === "confirmed") {
         noteSelfImpact(book, plan.buyPool.id, "arb", plan.quoteIn * quoteMarkUsd, qSym, qSym);
       }
       const diff = realizedQuote ?? plan.quoteOut - plan.quoteIn;

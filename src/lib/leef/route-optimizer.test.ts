@@ -323,6 +323,31 @@ describe("contract-qualified route token resolution", () => {
     ]);
     expect(resolveTokenId("USDC@usdc.token", graph)).toBe("USDC@usdc.token");
   });
+  it("preserves exact endpoint contracts in direct route and leg metadata", () => {
+    const route = bestExecutionRoute(
+      [],
+      [
+        aux({
+          id: 905,
+          a: { symbol: "USDC", contract: "usdc.token", quantity: 50_000 },
+          b: { symbol: "WAX", contract: "eosio.token", quantity: 100_000 },
+        }),
+        aux({
+          id: 906,
+          a: { symbol: "USDC", contract: "fake.usdc", quantity: 500_000 },
+          b: { symbol: "WAX", contract: "eosio.token", quantity: 100_000 },
+        }),
+      ],
+      100,
+      "USDC@usdc.token",
+      "WAX",
+    );
+    expect(route).not.toBeNull();
+    expect(route?.tokenInContract).toBe("usdc.token");
+    expect(route?.tokenOutContract).toBe("eosio.token");
+    expect(route?.legs[0]?.tokenInContract).toBe("usdc.token");
+    expect(route?.legs[0]?.tokenOutContract).toBe("eosio.token");
+  });
 });
 
 describe("LEEF near-tie preference", () => {

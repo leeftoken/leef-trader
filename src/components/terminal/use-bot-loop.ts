@@ -132,6 +132,9 @@ function maybeKickAiPoll(
       if (proposal) {
         journal({
           kind: "ai",
+          aiSource: "jev",
+          aiModel: proposal.model,
+          aiSnapshotAt: proposal.snapshotFetchedAt,
           decision: proposal.action,
           strategy: b.strategy,
           mode,

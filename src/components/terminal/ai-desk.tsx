@@ -574,6 +574,7 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
                 </button>
               ))}
               <span className="text-muted-foreground">trades</span>
+              </div>
             </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

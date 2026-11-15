@@ -9,10 +9,10 @@
  * Fallback: Hyperion /v2/history/get_transaction (transfer parse).
  *
  * Statuses:
- *  - confirmed: the tx executed; transfers were parsed when available.
+ *  - confirmed: the tx executed AND transfer actions were parsed.
  *  - failed:    the tx is on-chain but did not execute (nothing moved).
- *  - unknown:   no node has it (yet). NEVER retry the trade on unknown —
- *               the tx may still land; retrying is how double spends happen.
+ *  - unknown:   inclusion may be known, but transfer evidence is not available.
+ *               NEVER treat inclusion-only as a completed fill. NEVER retry.
  */
 import { fetchJson } from "@/lib/fetchJson";
 import { getTransactionStatus } from "./chain";
@@ -114,7 +114,7 @@ export function hyperionTxVerdict(
   parsed: ({ executed: boolean; transfers: TxTransfer[] } | null)[],
 ): ReconcileResult | null {
   const found = parsed.filter((p): p is { executed: boolean; transfers: TxTransfer[] } => p != null);
-  const good = found.find((p) => p.executed);
+  const good = found.find((p) => p.executed && p.transfers.length > 0);
   if (good) return { status: "confirmed", txid, transfers: good.transfers };
   if (found.filter((p) => !p.executed).length >= 2) {
     return { status: "failed", txid, error: "Transaction failed on-chain — nothing moved" };
@@ -153,9 +153,9 @@ async function hyperionOnce(txid: string): Promise<ReconcileResult | null> {
  * 1. RPC history status (block inclusion) — usually sub-second after land.
  * 2. Hyperion for transfer parse (needed for exact fill amounts).
  *
- * Default budget is short on the HOT path (~1.2s). Callers that need full
- * transfer reconciliation can pass a longer budget; the bot should NOT
- * hold the next-decision lock on Hyperion lag.
+ * Default budget is short on the HOT path (~1.2s). If RPC inclusion is
+ * visible before Hyperion transfer indexing, the result remains UNKNOWN.
+ * Callers must keep the capital lock and must not book estimated P&L.
  */
 export async function waitForTransaction(
   txid: string,
@@ -178,10 +178,9 @@ export async function waitForTransaction(
     const hyp = await hyperionOnce(txid);
     if (hyp) return hyp;
 
-    // Included but Hyperion hasn't indexed transfers yet — still a fill.
-    if (rpc === "executed") {
-      return { status: "confirmed", txid, transfers: [] };
-    }
+    // RPC inclusion without parsed transfers is not enough to settle a fill.
+    // Keep polling within this budget; if indexing still lags, return UNKNOWN
+    // so callers retain the capital lock and do not book the router estimate.
   }
   return { status: "unknown", txid };
 }

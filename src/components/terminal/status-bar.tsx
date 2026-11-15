@@ -7,6 +7,10 @@ import { useMarketEngine } from "@/hooks/useMarketEngine";
 import { cn } from "@/lib/utils";
 import { relTime, useNow } from "./use-now";
 import { VersionBanner } from "./version-banner";
+import { useTerminal } from "@/store/terminal";
+import { useAiControl } from "./ai-control";
+import { liveCapitalBlocked, pendingTxid, tradePhase, unknownBlockReason } from "@/lib/wallet/trade-cycle";
+import { Button } from "@/components/ui/button";
 
 export function StatusBar({
   snap,
@@ -20,6 +24,14 @@ export function StatusBar({
   // Live infra pulse (head block age etc.) between engine commits.
   const now = useNow();
   const engine = useMarketEngine();
+  const setTab = useTerminal((s) => s.setTab);
+  const aiEnabled = useTerminal((s) => s.aiEnabled);
+  const learningMode = useTerminal((s) => s.learningMode);
+  const { mode: jevMode } = useAiControl();
+  const capitalBlocked = liveCapitalBlocked();
+  const capitalPhase = tradePhase();
+  const unresolvedTxid = pendingTxid();
+  const capitalReason = unknownBlockReason();
   const h = headline(ranked);
   const stats = marketStats(snap);
   const synced = relTime(snap.fetchedAt, now);
@@ -134,6 +146,29 @@ export function StatusBar({
             <span className={engine.autoTrade.bot ? "text-leef" : "text-subtle"}>●</span>{" "}
             {engine.autoTrade.bot ? "auto" : "idle"}
           </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-[11px]"
+            aria-label="Open AI and Jev settings"
+            onClick={() => setTab("ai")}
+          >
+            <span className={aiEnabled ? "text-leef" : "text-subtle"}>●</span>
+            Helper {aiEnabled ? "ON" : "OFF"}
+            {aiEnabled && <span className="text-subtle">· {learningMode === "controlled" ? "learning" : "suggest"}</span>}
+            <span className="text-border">/</span>
+            <span className={jevMode === "off" ? "text-subtle" : jevMode === "control" ? "text-warn" : "text-leef"}>●</span>
+            Jev {jevMode.toUpperCase()}
+          </Button>
+          {capitalBlocked && (
+            <span
+              className="font-mono text-warn"
+              title={capitalReason ?? "Unresolved WAX transaction"}
+            >
+              ● {capitalPhase === "blocked" ? "signing interrupted" : "settlement pending"}
+              {unresolvedTxid ? " · " + unresolvedTxid.slice(0, 8) + "…" : ""}
+            </span>
+          )}
           <span className="font-mono tabular-nums">
             Synced <span className="text-fg">{synced}</span>
           </span>

@@ -191,7 +191,7 @@ function maybeKickAiPoll(
 
       if (
         !proposal ||
-        (proposal.action !== "buy" && proposal.action !== "swap") ||
+        proposal.action !== "buy" ||
         terminal.aiHelperControl === "off" ||
         !terminal.aiEnabled
       ) return;
@@ -802,7 +802,7 @@ async function runBotOnceInner(
     // exposure, never a trade generator or an exit veto.
     if (
       useTerminal.getState().aiHelperControl === "control" &&
-      (fresh.action === "buy" || fresh.action === "swap")
+      fresh.action === "buy"
     ) {
       const candidate = {
         proposalId: fresh.proposalId,

@@ -10,12 +10,12 @@ const DECIMALS_BY_ID: Record<string, number> = {
   "parausd-parareserves": 6,
 };
 
-function decimalsForAlcorId(id: string): number {
+export function decimalsForAlcorId(id: string): number {
   const known = DECIMALS_BY_ID[id.toLowerCase()];
   if (known != null) return known;
-  // Alcor ids are `symbol-contract`. Guess from common WAX precisions.
-  if (id.startsWith("wax-")) return 8;
-  return 4;
+  // Precision is part of the token identity. Guessing can silently quote or
+  // sign the wrong raw amount, so unknown catalog entries must fail closed.
+  throw new Error(`Missing authoritative precision for Alcor token ${id}`);
 }
 
 /**

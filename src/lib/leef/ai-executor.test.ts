@@ -61,12 +61,12 @@ describe("buildAiQuestions", () => {
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
     expect(Object.keys(criteria)).toEqual(["hold", "buy", "sell", "swap", "reduce_risk"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
-    expect(q[AI_QID.swapTokenIn]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
     expect(q[AI_QID.riskExecute]?.type).toBe("noul");
-    // Closed sets come from the summary, never free text.
-    const tin = (q[AI_QID.swapTokenIn] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(tin)).toEqual(["WAX", "LEEF"]);
+    // Jev cannot propose arbitrary token swaps from symbol-only wallet data.
+    expect(criteria).not.toHaveProperty("swap");
+    expect(q[AI_QID.swapTokenIn]).toBeUndefined();
+    expect(q[AI_QID.swapTokenOut]).toBeUndefined();
   });
 });
 
@@ -119,31 +119,10 @@ describe("parseAiProposal", () => {
     expect(exit!.action).toBe("reduce_risk");
   });
 
-  it("swap requires both token args, distinct, with confidences", () => {
+  it("rejects free-form token swaps until the API carries contract-exact token identities", () => {
     const p = parseAiProposal({
       ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-    }, metadata());
-    expect(p).not.toBeNull();
-    expect(p!.params.tokenIn).toBe("WAX");
-    expect(p!.params.tokenOut).toBe("LEEF");
-    // weakest includes the 0.7 token confidences
-    expect(p!.confidence).toBeCloseTo(0.7, 6);
-    expect(p!.weakest).toBe(AI_QID.swapTokenIn);
-
-    const same = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-      [AI_QID.swapTokenOut]: { type: "choice", choice: "WAX", confidence: 0.9 },
-    }, metadata());
-    expect(same).toBeNull();
-  });
-
-  it("rejects swap arguments outside the request's closed token sets", () => {
-    const p = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-      [AI_QID.swapTokenIn]: { type: "choice", choice: "FAKE", confidence: 0.99 },
+      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.99 },
     }, metadata());
     expect(p).toBeNull();
   });

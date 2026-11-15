@@ -321,7 +321,7 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
     [AI_QID.action]: {
       type: "choice",
       instructions:
-        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its token pair, amount, expected output/edge, route impact and pool path together with state.market and state.portfolio. Choose hold to reject it, or the matching candidate action to accept it. Never invent a new trade, change the candidate type, amount, token pair or route.",
+        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its token pair, amount, expected output/edge, route impact and pool path together with state.market, balances and position details. Choose hold to reject it, or the matching candidate action to accept it. Never invent a new trade, change the candidate type, amount, token pair or route.",
       criteria: actionCriteria,
     },
     [AI_QID.riskStress]: {
@@ -407,7 +407,12 @@ export function parseAiProposal(
   if (!actionAns || !(AI_ACTIONS as string[]).includes(actionAns.choice)) return null;
   const action = actionAns.choice as AiAction;
   if (context && !context.allowedActions.includes(action)) return null;
-  if (context && action !== "hold" && action !== context.candidateKind) return null;
+  if (
+    context &&
+    action !== "hold" &&
+    context.candidateKind !== "preview" &&
+    action !== context.candidateKind
+  ) return null;
 
   const execOk = noulOf(answers, AI_QID.riskExecute);
   const stress = noulOf(answers, AI_QID.riskStress);

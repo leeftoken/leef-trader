@@ -63,7 +63,7 @@ import { snapFreshAtMs, type LeefSnapshot, type SwapRoute } from "@/lib/leef/typ
 import { parseAssetAmount, type AlcorRouteQuote } from "@/lib/wallet/alcor-route";
 import { waxResourceBlock } from "@/lib/wallet/chain";
 import { arbFloorViolation, memoMinOutSum } from "@/lib/wallet/policy";
-import { assetDelta, reconcileTransfersLater, waitForTransaction } from "@/lib/wallet/reconcile";
+import { assetDelta, matchesExactDebit, reconcileTransfersLater, waitForTransaction } from "@/lib/wallet/reconcile";
 import { signAndPushArb, signAndPushSwap } from "@/lib/wallet/sign";
 import {
   abortSigning,
@@ -1651,9 +1651,7 @@ async function runBotOnceInner(
             const quoteMeta = metaOf(quoteTok, book);
             const actual = assetDelta(rec.transfers, w.account, baseMeta.symbol, baseMeta.contract);
             const spent = assetDelta(rec.transfers, w.account, quoteMeta.symbol, quoteMeta.contract);
-            const exactInputDebit =
-              spent < 0 &&
-              Math.abs(-spent - decision.amountIn) <= 1 / 10 ** quoteMeta.decimals + 1e-12;
+            const exactInputDebit = matchesExactDebit(spent, decision.amountIn, quoteMeta.decimals);
             if (actual > 0 && exactInputDebit) {
               amountLeef = actual;
               quoteSpent = -spent;
@@ -1831,9 +1829,7 @@ async function runBotOnceInner(
             const baseMeta = metaOf(b.base || "LEEF", book);
             const actualIn = assetDelta(rec.transfers, w.account, baseMeta.symbol, baseMeta.contract);
             const actualOut = assetDelta(rec.transfers, w.account, sellQuoteMeta.symbol, sellQuoteMeta.contract);
-            const fullPositionDebited =
-              actualIn < 0 &&
-              Math.abs(-actualIn - decision.amountLeef) <= 1 / 10 ** baseMeta.decimals + 1e-12;
+            const fullPositionDebited = matchesExactDebit(actualIn, decision.amountLeef, baseMeta.decimals);
             if (fullPositionDebited && actualOut > 0) {
               quoteOut = actualOut;
               note = " · confirmed on-chain";

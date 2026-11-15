@@ -23,23 +23,26 @@ function summary(): AiSnapshotSummary {
     topPools: [
       { id: 217, pair: "LEEF/WAX", feePct: 0.3, tvlUsd: 900, volume24Usd: 6.6, change24: 1.2 },
     ],
-    candidatesIn: ["WAX", "LEEF"],
-    candidatesOut: ["LEEF", "WAX", "WAXUSDC"],
+    engineCandidate: {
+      id: "engine:buy:217:10.0000000000",
+      tokenIn: "WAX",
+      tokenOut: "LEEF",
+      amountIn: 10,
+      routeSignature: "alcor:217",
+      netEdgePct: 1.25,
+      priceImpactPct: 0.4,
+      reason: "Deterministic engine found a viable BUY candidate after its entry gates.",
+    },
   };
 }
 
-function metadata(summary = summaryForTest(), receivedAt = Date.parse("2026-11-15T12:00:00.000Z")) {
+function metadata(s = summary(), receivedAt = Date.parse("2026-11-15T12:00:00.000Z")) {
   return {
-    snapshotFetchedAt: summary.fetchedAt,
-    candidatesIn: summary.candidatesIn,
-    candidatesOut: summary.candidatesOut,
+    snapshotFetchedAt: s.fetchedAt,
+    engineCandidateId: s.engineCandidate?.id ?? "engine:buy:test",
     model: "jev-latest",
     receivedAt,
   };
-}
-
-function summaryForTest(): AiSnapshotSummary {
-  return summary();
 }
 
 function answers(over: Partial<JevAnswers> = {}): JevAnswers {
@@ -55,16 +58,19 @@ function answers(over: Partial<JevAnswers> = {}): JevAnswers {
 }
 
 describe("buildAiQuestions", () => {
-  it("asks one action choice plus per-arg closed sets and risk nouls in a single request", () => {
+  it("asks Jev only whether to execute the exact engine candidate or hold", () => {
     const q = buildAiQuestions(summary());
     expect(q[AI_QID.action]?.type).toBe("choice");
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "buy", "sell", "reduce_risk"]);
+    expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
+    expect((criteria.buy as string)).toContain("WAX→LEEF");
+    expect((criteria.buy as string)).toContain("alcor:217");
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
     expect(q[AI_QID.riskExecute]?.type).toBe("noul");
-    // Jev cannot propose arbitrary token swaps from symbol-only wallet data.
+    // No arbitrary action, token, route, or size can be introduced by Jev.
     expect(criteria).not.toHaveProperty("swap");
+    expect(criteria).not.toHaveProperty("sell");
     expect(q[AI_QID.swapTokenIn]).toBeUndefined();
     expect(q[AI_QID.swapTokenOut]).toBeUndefined();
   });
@@ -72,7 +78,7 @@ describe("buildAiQuestions", () => {
 
 describe("parseAiProposal", () => {
   it("parses a buy proposal; confidence is the weakest relevant judgment", () => {
-    const p = parseAiProposal(answers());
+    const p = parseAiProposal(answers(), metadata());
     expect(p).not.toBeNull();
     expect(p!.action).toBe("buy");
     expect(p!.params.sizePct).toBe("50");
@@ -83,6 +89,8 @@ describe("parseAiProposal", () => {
     expect(p!.proposalId).toContain("jev:");
     expect(p!.snapshotFetchedAt).toBe(summary().fetchedAt);
     expect(p!.model).toBe("jev-latest");
+    expect(p!.engineCandidateId).toBe("engine:buy:217:10.0000000000");
+    expect(p!.proposalId).toContain(p!.engineCandidateId);
   });
 
   it("hold needs no size bucket and ignores swap args", () => {
@@ -108,15 +116,19 @@ describe("parseAiProposal", () => {
     expect(p).toBeNull();
   });
 
-  it("acute stress vetoes entries but not exits", () => {
+  it("acute stress vetoes entries and Jev cannot override the engine's exits", () => {
     const stressed = { ...answers(), [AI_QID.riskStress]: { type: "noul", noul: 0.9 } };
-    expect(parseAiProposal(stressed)).toBeNull(); // buy vetoed
-    const exit = parseAiProposal({
-      ...stressed,
-      [AI_QID.action]: { type: "choice", choice: "reduce_risk", confidence: 0.95 },
-    });
-    expect(exit).not.toBeNull();
-    expect(exit!.action).toBe("reduce_risk");
+    expect(parseAiProposal(stressed, metadata())).toBeNull();
+    const sell = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "sell", confidence: 0.99 },
+    }, metadata());
+    expect(sell).toBeNull();
+    const reduce = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "reduce_risk", confidence: 0.99 },
+    }, metadata());
+    expect(reduce).toBeNull();
   });
 
   it("rejects free-form token swaps until the API carries contract-exact token identities", () => {
@@ -142,7 +154,7 @@ describe("parseAiProposal", () => {
     const p = parseAiProposal({
       ...answers(),
       [AI_QID.sizeBucket]: { type: "choice", choice: "yuge", confidence: 0.99 },
-    });
+    }, metadata());
     expect(p).toBeNull();
   });
 

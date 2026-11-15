@@ -162,7 +162,10 @@ function aiEngineCandidateOf(
   const amountIn = Number(decision.amountIn.toPrecision(12));
   const routeSig = routeSignature(decision.route);
   return {
-    id: ["engine-buy", snapshotFetchedAt, b.strategy, tokenIn, tokenOut, amountIn.toPrecision(12), routeSig].join(":"),
+    id: ["engine-buy", b.strategy, tokenIn, tokenOut, amountIn.toPrecision(12), routeSig,
+      (decision.edge?.netEdgePct ?? 0).toFixed(2),
+      decision.route.priceImpact.toFixed(4),
+    ].join(":"),
     snapshotFetchedAt,
     tokenIn,
     tokenOut,

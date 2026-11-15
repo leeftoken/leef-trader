@@ -27,7 +27,7 @@ For a deterministic engine BUY candidate in combined CONTROL, all of the followi
 
 A missing response, timeout, malformed schema, candidate mismatch, stale/future timestamp, abstention, veto, low confidence, or any risk flag blocks new exposure. It does not silently fall back to Jev-only execution while helper CONTROL is selected.
 
-Protective engine exits and Jev SELL/REDUCE_RISK actions are not subject to the helper approval gate. The helper cannot delay or veto risk-reducing exits. The standard sell, stop, sizing, route, portfolio, resource, policy, simulation, signing, and reconciliation protections remain in force.
+Protective engine SELL and STOP decisions are not subject to the helper approval gate. Jev is not allowed to choose exits; the engine's exit logic remains authoritative. The helper cannot delay or veto risk-reducing exits. The standard sell, stop, sizing, route, portfolio, resource, policy, simulation, signing, and reconciliation protections remain in force.
 
 The engine's existing HOLD path remains conservative: Jev cannot manufacture an entry when the deterministic engine has already returned a HOLD or STOP. Jev also cannot replace a SELL, STOP, ARB, or SWAP decision. The AI control seam only runs on deterministic BUY candidates that pass the engine's earlier eligibility checks.
 

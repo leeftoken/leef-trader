@@ -52,6 +52,13 @@ import {
   type AiProposal,
 } from "@/lib/leef/ai-executor";
 import { askJev } from "@/lib/leef/jev-client";
+import { aiTask } from "@/lib/leef/ai-analyst";
+import {
+  buildAiHelperReviewPayload,
+  evaluateAiHelperReview,
+  helperReviewOfResult,
+  isAiProposalFresh,
+} from "@/lib/leef/ai-helper-control";
 import { refreshExecutionState } from "@/lib/market/execution-state";
 import { aggregateFlowRisk, swapFlow } from "@/lib/market/swap-flow";
 import { governTrade, portfolioState } from "@/lib/market/portfolio-governor";
@@ -100,23 +107,123 @@ let aiLastPollAt = 0;
  * lands in the terminal store for the AI desk; the control seam reads it.
  * Never throws — Jev is advisory infrastructure, not liveness-critical.
  */
+function helperDeterministicContext(
+  snap: LeefSnapshot,
+  b: ReturnType<typeof useBot.getState>,
+): Record<string, unknown> {
+  const regime = classifyRegime({
+    series: b.series,
+    poolPricesUsd: snap.pools.map((p) => p.usdPerLeef ?? 0).filter((v) => v > 0),
+  });
+  const danger = dangerScore({
+    quoteAgeMs: Math.max(0, Date.now() - Date.parse(snap.fetchedAt)),
+    maxQuoteAgeMs: Math.max(15, b.risk.maxQuoteAgeSec) * 1_000,
+    volPct: regime.volPct,
+    dislocationPct: regime.dislocationPct,
+    liquidityUsd: Math.max(0, ...snap.pools.map((p) => p.tvlUsd)),
+    recentFailures: b.decisions.filter(
+      (d) => d.kind === "error" && isEconomicFailureReason(d.reason) && Date.now() - Date.parse(d.t) < 600_000,
+    ).length,
+  });
+  return {
+    regime: regime.regime,
+    regimeConfidence: regime.confidence,
+    volatilityPerPrintPct: regime.volPct,
+    poolDislocationPct: regime.dislocationPct,
+    dangerScore: danger.score,
+    dangerBand: danger.band,
+    deterministicEntrySizeFactor: danger.sizeFactor,
+    deterministicRiskReasons: [...regime.explain, ...danger.explain].slice(0, 8),
+    strategy: b.strategy,
+    configuredPair: { base: b.base, quote: b.quote },
+    position: b.position
+      ? {
+          amount: b.position.amountLeef,
+          entryUsd: b.position.entryUsd,
+          highUsd: b.position.highUsd,
+          mode: b.position.mode,
+        }
+      : null,
+    riskCaps: {
+      minNetEdgePct: b.risk.minNetEdgePct,
+      maxImpactPct: b.risk.maxImpactPct,
+      maxPositionUsd: b.risk.maxPositionUsd,
+      maxQuoteAgeSec: b.risk.maxQuoteAgeSec,
+      maxDrawdownPct: b.risk.maxDrawdownPct,
+      slippagePct: b.risk.slippage,
+    },
+  };
+}
+
+/**
+ * Jev is polled first. If configured, the larger AI helper then reviews that
+ * exact proposal asynchronously. No response is awaited by the trade loop;
+ * dual CONTROL consumes only a fresh, candidate-bound approval.
+ */
 function maybeKickAiPoll(
   snap: LeefSnapshot,
   b: ReturnType<typeof useBot.getState>,
   balances: Record<string, number>,
 ): void {
+  const initial = useTerminal.getState();
   if (import.meta.env.MODE === "test") return;
-  if (useTerminal.getState().aiControl === "off") return;
+  if (initial.aiControl === "off") return;
   if (snap.source !== "live") return;
   const now = Date.now();
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
   const summary = aiSummaryOf(snap, b, balances);
+  const deterministic = helperDeterministicContext(snap, b);
   void (async () => {
     try {
       const res = await askJev(summary, buildAiQuestions(summary));
-      useTerminal.getState().setAiProposal(res ? parseAiProposal(res.answers) : null);
+      const receivedAt = Date.now();
+      const proposal = res
+        ? parseAiProposal(res.answers, {
+            snapshotFetchedAt: summary.fetchedAt,
+            candidatesIn: summary.candidatesIn,
+            candidatesOut: summary.candidatesOut,
+            model: res.model,
+            receivedAt,
+          })
+        : null;
+      const terminal = useTerminal.getState();
+      terminal.setAiProposal(proposal);
+      terminal.setAiHelperReview(null);
+
+      if (
+        !proposal ||
+        (proposal.action !== "buy" && proposal.action !== "swap") ||
+        terminal.aiHelperControl === "off" ||
+        !terminal.aiEnabled
+      ) return;
+
+      try {
+        const reviewData = buildAiHelperReviewPayload(
+          proposal,
+          summary as unknown as Record<string, unknown>,
+          deterministic,
+        );
+        const helper = await aiTask("opportunity_explanation", reviewData, {
+          url: terminal.aiGatewayUrl,
+          timeoutMs: 12_000,
+        });
+        const review = helperReviewOfResult(helper, proposal, Date.now());
+        const current = useTerminal.getState();
+        if (current.aiHelperControl !== "off") current.setAiHelperReview(review);
+        journal({
+          kind: "ai",
+          reason: review
+            ? `AI helper ${review.decision} Jev ${proposal.action} · confidence ${review.confidence.toFixed(2)} · ${review.reason.slice(0, 160)}`
+            : `AI helper review unusable for Jev ${proposal.action} · no candidate-bound approval`,
+          latencyMs: helper.latencyMs,
+        });
+      } catch (err) {
+        useTerminal.getState().setAiHelperReview(null);
+        const reason = err instanceof Error ? err.message.slice(0, 160) : "helper unavailable";
+        journal({ kind: "ai", reason: `AI helper review unavailable · ${reason}` });
+      }
     } finally {
       aiPollInFlight = false;
     }
@@ -673,8 +780,7 @@ async function runBotOnceInner(
   // still pass — the AI can never suppress a risk exit.
   if (useTerminal.getState().aiControl === "control" && decision.kind !== "sell") {
     const p = useTerminal.getState().aiProposal;
-    const fresh: AiProposal | null =
-      p && cycleT0 - p.fetchedAt <= AI_PROPOSAL_MAX_AGE_MS ? p : null;
+    const fresh: AiProposal | null = p && isAiProposalFresh(p, Date.now()) ? p : null;
     const aiHold = (reason: string): Decision => {
       b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
       b.setLastReason(reason);
@@ -694,6 +800,37 @@ async function runBotOnceInner(
       return aiHold(
         `AI control: Jev ${fresh.action} below confidence floor (${fresh.confidence.toFixed(2)} < ${AI_EXEC_CONFIDENCE_MIN}) — no-op`,
       );
+    }
+    // Dual CONTROL: the strategic helper is a second-key reviewer for new
+    // exposure, never a trade generator or an exit veto.
+    if (
+      useTerminal.getState().aiHelperControl === "control" &&
+      (fresh.action === "buy" || fresh.action === "swap")
+    ) {
+      const candidate = {
+        proposalId: fresh.proposalId,
+        action: fresh.action,
+        snapshotFetchedAt: fresh.snapshotFetchedAt,
+        proposedAt: fresh.fetchedAt,
+      };
+      const helperGate = evaluateAiHelperReview(
+        useTerminal.getState().aiHelperReview,
+        candidate,
+        Date.now(),
+      );
+      journal({
+        kind: "gate",
+        gate: "ai-helper",
+        pass: helperGate.allowed,
+        reason: helperGate.reason,
+        strategy: b.strategy,
+        mode,
+        leefUsd: book.leefUsd,
+        waxUsd: book.waxUsd,
+      });
+      if (!helperGate.allowed) {
+        return aiHold(`Dual AI control: ${helperGate.reason}`);
+      }
     }
     const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
     const tag = `AI · Jev ${fresh.action} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;

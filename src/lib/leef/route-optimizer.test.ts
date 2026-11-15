@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   bestExecutionRoute,
+  buildRouteGraph,
   preferLeefNearTies,
+  resolveTokenId,
   rankExecutionRoutes,
   routeTouchesLeef,
 } from "./route-optimizer";
@@ -286,6 +288,40 @@ describe("execution router", () => {
     expect(r).not.toBeNull();
     expect(r!.poolIds).toContain(699);
     expect(r!.poolIds).toContain(500);
+  });
+});
+
+describe("contract-qualified route token resolution", () => {
+  it("rejects an ambiguous bare ticker instead of selecting the deepest contract", () => {
+    const graph = buildRouteGraph([], [
+      aux({
+        id: 901,
+        a: { symbol: "USDC", contract: "usdc.token", quantity: 50_000 },
+        b: { symbol: "WAX", contract: "eosio.token", quantity: 100_000 },
+      }),
+      aux({
+        id: 902,
+        a: { symbol: "USDC", contract: "fake.usdc", quantity: 500_000 },
+        b: { symbol: "WAX", contract: "eosio.token", quantity: 100_000 },
+      }),
+    ]);
+    expect(resolveTokenId("USDC", graph)).toBeNull();
+  });
+
+  it("allows an explicit symbol@contract when duplicate tickers exist", () => {
+    const graph = buildRouteGraph([], [
+      aux({
+        id: 903,
+        a: { symbol: "USDC", contract: "usdc.token", quantity: 50_000 },
+        b: { symbol: "WAX", contract: "eosio.token", quantity: 100_000 },
+      }),
+      aux({
+        id: 904,
+        a: { symbol: "USDC", contract: "fake.usdc", quantity: 500_000 },
+        b: { symbol: "WAX", contract: "eosio.token", quantity: 100_000 },
+      }),
+    ]);
+    expect(resolveTokenId("USDC@usdc.token", graph)).toBe("USDC@usdc.token");
   });
 });
 

@@ -332,42 +332,76 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
             <p className="mb-3 text-xs text-muted-foreground">
               {strat.detail}
             </p>
-            <div className="flex flex-col gap-2">
-              {STRATEGIES.map((s) => {
-                const on = s.id === b.strategy;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    disabled={b.running}
-                    onClick={() => b.setStrategy(s.id)}
-                    className={cn(
-                      "flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                      on
-                        ? "border-accent/40 bg-accent/10"
-                        : "border-border bg-background text-muted-foreground hover:text-foreground",
-                      b.running && "opacity-60",
-                    )}
-                  >
-                    <span>
-                      <span className={cn("block text-sm", on && "text-foreground")}>
-                        {s.name}
+            <button
+              type="button"
+              disabled={b.running}
+              onClick={() => b.setStrategy("auto")}
+              className={cn(
+                "mb-3 flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors",
+                b.strategy === "auto"
+                  ? "border-leef/50 bg-leef/10"
+                  : "border-border bg-background hover:border-leef/40",
+                b.running && "opacity-60",
+              )}
+            >
+              <span>
+                <span className="block text-sm font-semibold">Auto · recommended starting mode</span>
+                <span className="block text-xs text-muted-foreground">
+                  The engine ranks eligible strategy candidates using live costs, route quality and risk gates
+                </span>
+              </span>
+              <Badge variant={b.strategy === "auto" ? "leef" : "plain"}>
+                {b.strategy === "auto" ? "Active" : "Select"}
+              </Badge>
+            </button>
+            <details className="rounded-lg border border-border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
+                Specialist strategies ({STRATEGIES.length - 1})
+              </summary>
+              <div className="mt-3 flex flex-col gap-2">
+                {STRATEGIES.filter((strategy) => strategy.id !== "auto").map((s) => {
+                  const on = s.id === b.strategy;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      disabled={b.running}
+                      onClick={() => b.setStrategy(s.id)}
+                      className={cn(
+                        "flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                        on
+                          ? "border-accent/40 bg-accent/10"
+                          : "border-border bg-background text-muted-foreground hover:text-foreground",
+                        b.running && "opacity-60",
+                      )}
+                    >
+                      <span>
+                        <span className={cn("block text-sm", on && "text-foreground")}>
+                          {s.name}
+                        </span>
+                        <span className="block text-xs text-subtle">{s.tagline}</span>
                       </span>
-                      <span className="block text-xs text-subtle">{s.tagline}</span>
-                    </span>
-                    <span className="hidden min-[420px]:inline-flex">
-                      <Badge variant={on ? "accent" : "plain"}>{s.bestFor}</Badge>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                      <span className="hidden min-[420px]:inline-flex">
+                        <Badge variant={on ? "accent" : "plain"}>{s.bestFor}</Badge>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
           </Card>
 
-          {b.strategy !== "unleashed" && <GoalsCard />}
-          {b.strategy !== "unleashed" && b.strategy !== "growth" && <AdvisorCard snap={snap} />}
-          {b.strategy === "growth" && <TreasureCard snap={snap} />}
-          <RiskCard strategy={b.strategy} snap={snap} />
+          <details className="rounded-xl border border-border p-3">
+            <summary className="cursor-pointer text-sm font-semibold">
+              Goals, pair guidance and risk settings
+            </summary>
+            <div className="mt-4 flex flex-col gap-5">
+              {b.strategy !== "unleashed" && <GoalsCard />}
+              {b.strategy !== "unleashed" && b.strategy !== "growth" && <AdvisorCard snap={snap} />}
+              {b.strategy === "growth" && <TreasureCard snap={snap} />}
+              <RiskCard strategy={b.strategy} snap={snap} />
+            </div>
+          </details>
         </div>
 
         {/* ------------------------------ right rail ------------------------------ */}

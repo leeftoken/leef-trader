@@ -35,6 +35,20 @@ export interface AiProposal {
   candidateKey?: string;
 }
 
+export interface AiCandidateSummary {
+  kind: AiCandidateKind;
+  key: string;
+  tokenIn?: string;
+  tokenOut?: string;
+  amountIn?: number;
+  amountUsd?: number;
+  expectedOut?: number;
+  expectedNetEdgePct?: number;
+  priceImpactPct?: number;
+  poolIds?: number[];
+  hops?: number;
+}
+
 export interface AiProposalContext {
   snapshotFetchedAt: string;
   requestedAt: number;
@@ -122,6 +136,7 @@ export interface AiSnapshotSummary {
   /** The deterministic engine candidate Jev is judging this cycle. */
   candidateKind: AiCandidateKind;
   candidateKey: string;
+  candidate: AiCandidateSummary;
   /** Actions permitted for this exact candidate; the parser enforces this set. */
   allowedActions: AiAction[];
   /** Closed sets for swap arguments. The parser checks answers against them. */
@@ -169,6 +184,7 @@ export function aiSummaryOf(
   balances: Record<string, number>,
   candidateKind: AiCandidateKind = "other",
   candidateKey = "none",
+  candidateDetails: Omit<AiCandidateSummary, "kind" | "key"> = {},
 ): AiSnapshotSummary {
   const quote = (b.quote || "WAX").toUpperCase();
   const base = (b.base || "LEEF").toUpperCase();
@@ -290,6 +306,7 @@ export function aiSummaryOf(
     tokenUniverse,
     candidateKind,
     candidateKey,
+    candidate: { kind: candidateKind, key: candidateKey, ...candidateDetails },
     allowedActions,
     candidatesIn: candidatesIn.length > 0 ? candidatesIn : [quote],
     candidatesOut: candidatesOut.length > 0 ? candidatesOut : [base, quote],
@@ -316,7 +333,7 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
     [AI_QID.action]: {
       type: "choice",
       instructions:
-        "Judge ONLY the deterministic engine candidate identified by state.candidateKind and state.candidateKey. Choose hold to reject it, or the matching candidate action to accept it. Never invent a new trade, change the candidate type, or substitute another route.",
+        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its token pair, amount, expected output/edge, route impact and pool path together with state.market and state.portfolio. Choose hold to reject it, or the matching candidate action to accept it. Never invent a new trade, change the candidate type, amount, token pair or route.",
       criteria: actionCriteria,
     },
     [AI_QID.riskStress]: {

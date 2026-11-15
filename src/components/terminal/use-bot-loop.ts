@@ -49,6 +49,7 @@ import {
   aiSummaryOf,
   buildAiQuestions,
   parseAiProposal,
+  isAiProposalFresh,
   type AiProposal,
 } from "@/lib/leef/ai-executor";
 import { askJev } from "@/lib/leef/jev-client";
@@ -113,10 +114,36 @@ function maybeKickAiPoll(
   aiPollInFlight = true;
   aiLastPollAt = now;
   const summary = aiSummaryOf(snap, b, balances);
+  const requestedAt = Date.now();
   void (async () => {
     try {
       const res = await askJev(summary, buildAiQuestions(summary));
-      useTerminal.getState().setAiProposal(res ? parseAiProposal(res.answers) : null);
+      const receivedAt = Date.now();
+      const proposal = res
+        ? parseAiProposal(res.answers, {
+            snapshotFetchedAt: summary.fetchedAt,
+            requestedAt,
+            receivedAt,
+            model: res.model,
+            candidatesIn: summary.candidatesIn,
+            candidatesOut: summary.candidatesOut,
+          })
+        : null;
+      useTerminal.getState().setAiProposal(proposal);
+      if (proposal) {
+        journal({
+          kind: "ai",
+          reason: `jev proposal ${proposal.action} · model=${proposal.model} · confidence=${proposal.confidence.toFixed(2)} · snapshot=${proposal.snapshotFetchedAt}`,
+          latencyMs: receivedAt - requestedAt,
+          confidence: proposal.confidence,
+        });
+      } else {
+        journal({
+          kind: "ai",
+          reason: "jev proposal unavailable or rejected · no control action",
+          latencyMs: receivedAt - requestedAt,
+        });
+      }
     } finally {
       aiPollInFlight = false;
     }
@@ -674,7 +701,7 @@ async function runBotOnceInner(
   if (useTerminal.getState().aiControl === "control" && decision.kind !== "sell") {
     const p = useTerminal.getState().aiProposal;
     const fresh: AiProposal | null =
-      p && cycleT0 - p.fetchedAt <= AI_PROPOSAL_MAX_AGE_MS ? p : null;
+      isAiProposalFresh(p, snap.fetchedAt, cycleT0, AI_PROPOSAL_MAX_AGE_MS) ? p! : null;
     const aiHold = (reason: string): Decision => {
       b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
       b.setLastReason(reason);

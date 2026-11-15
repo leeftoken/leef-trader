@@ -46,6 +46,7 @@ import { classifyRegime, dangerScore } from "@/lib/leef/regime";
 import { maybeAutoReview } from "@/lib/leef/ai-review";
 import {
   AI_EXEC_CONFIDENCE_MIN,
+  AI_PROPOSAL_MAX_AGE_MS,
   aiSummaryOf,
   buildAiQuestions,
   parseAiProposal,
@@ -90,9 +91,6 @@ import { lastFetchTiming } from "@/lib/fetchJson";
 
 /** Min gap between Jev polls (one request, speculative fan-out). */
 const AI_POLL_MS = 45_000;
-/** A proposal older than this never executes — stale judgments don't trade. */
-const AI_PROPOSAL_MAX_AGE_MS = 120_000;
-
 let aiPollInFlight = false;
 let aiLastPollAt = 0;
 

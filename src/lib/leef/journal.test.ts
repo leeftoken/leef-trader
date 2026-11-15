@@ -40,6 +40,22 @@ describe("aggregateEntries", () => {
     expect(s.topGateFails).toEqual([]);
   });
 
+  it("excludes included and unknown router estimates from realized performance", () => {
+    const entries: JournalEntry[] = [
+      e({ ts: 1, kind: "execution", strategy: "auto", action: "sell", status: "included", pnlUsd: 99 }),
+      e({ ts: 2, kind: "execution", strategy: "auto", action: "sell", status: "unknown", pnlUsd: 88 }),
+      e({ ts: 3, kind: "execution", strategy: "auto", action: "sell", status: "confirmed", pnlUsd: -2 }),
+      e({ ts: 4, kind: "execution", strategy: "auto", action: "sell", status: "paper", pnlUsd: 1 }),
+    ];
+    const result = aggregateEntries(entries).byStrategy[0]!;
+    expect(result.executions).toBe(4);
+    expect(result.confirmed).toBe(1);
+    expect(result.unknown).toBe(2);
+    expect(result.paper).toBe(1);
+    expect(result.wins).toBe(1);
+    expect(result.pnlUsd).toBe(-1);
+  });
+
   it("aggregates decisions, gates, executions and calibration per strategy", () => {
     const entries: JournalEntry[] = [
       e({ ts: 100, kind: "decision", strategy: "auto", decision: "hold", reason: "no edge" }),

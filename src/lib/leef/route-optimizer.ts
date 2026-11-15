@@ -94,11 +94,15 @@ function quoteEdge(edge: Edge, amountIn: number): QuoteLeg | null {
   if (!(amountIn > 0) || reserveIn < amountIn * MIN_RESERVE_MULT) return null;
   const q = quoteConstantProduct(amountIn, reserveIn, reserveOut, edge.fee);
   if (q.amountOut <= 0 || q.priceImpact >= MAX_IMPACT) return null;
+  const from = parseId(edge.from);
+  const to = parseId(edge.to);
   return {
     poolId: edge.poolId,
     pairName: edge.pairName,
     tokenIn: edge.fromSym,
     tokenOut: edge.toSym,
+    tokenInContract: from.contract,
+    tokenOutContract: to.contract,
     amountIn,
     amountOut: q.amountOut,
     feePct: edge.feePct,
@@ -140,6 +144,8 @@ function routeFromLegs(
     amountOut,
     tokenIn: first.tokenIn,
     tokenOut: last.tokenOut,
+    tokenInContract: first.tokenInContract,
+    tokenOutContract: last.tokenOutContract,
     feePct: feePct * 100,
     priceImpact: combineImpact(legs),
     executionPrice: amountIn > 0 ? amountOut / amountIn : 0,
@@ -588,6 +594,8 @@ function splitDirect(
   route.executionPrice = best.out / amountIn;
   route.tokenIn = parseId(from).symbol;
   route.tokenOut = parseId(to).symbol;
+  route.tokenInContract = parseId(from).contract;
+  route.tokenOutContract = parseId(to).contract;
   return route;
 }
 
@@ -793,7 +801,14 @@ export function bestExecutionRoutePreferLeef(
   );
 }
 
-export type SplitSlice = { amountIn: number; tokenIn: string; tokenOut: string; poolId: number };
+export type SplitSlice = {
+  amountIn: number;
+  tokenIn: string;
+  tokenOut: string;
+  tokenInContract?: string;
+  tokenOutContract?: string;
+  poolId: number;
+};
 
 /** Parallel slices for a split route (live batch / paper multi-fill). */
 export function splitSlices(route: SwapRoute): SplitSlice[] | null {
@@ -802,6 +817,8 @@ export function splitSlices(route: SwapRoute): SplitSlice[] | null {
     amountIn: l.amountIn,
     tokenIn: l.tokenIn,
     tokenOut: l.tokenOut,
+    tokenInContract: l.tokenInContract,
+    tokenOutContract: l.tokenOutContract,
     poolId: l.poolId,
   }));
 }

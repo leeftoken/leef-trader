@@ -155,9 +155,14 @@ describe("hyperionTxVerdict (M2 — failed verdicts need ≥2 agreeing indexers)
     expect(hyperionTxVerdict("t", [failed, null, failed])).toMatchObject({ status: "failed" });
   });
 
-  it("executed stays single-source and wins over failed reports", () => {
-    expect(hyperionTxVerdict("t", [good])).toMatchObject({ status: "confirmed" });
-    expect(hyperionTxVerdict("t", [failed, good])).toMatchObject({ status: "confirmed" });
+  it("does not call an executed transaction settled until transfers are parsed", () => {
+    expect(hyperionTxVerdict("t", [good])).toBeNull();
+    expect(hyperionTxVerdict("t", [failed, good])).toBeNull();
+    const withTransfers = {
+      executed: true,
+      transfers: parseHyperionTransfers(SWAP_TX)!.transfers,
+    };
+    expect(hyperionTxVerdict("t", [withTransfers])).toMatchObject({ status: "confirmed" });
   });
 
   it("nothing parsed → null", () => {

@@ -111,9 +111,14 @@ function maybeKickAiPoll(
   candidateDetails: Omit<AiCandidateSummary, "kind" | "key">,
 ): void {
   if (import.meta.env.MODE === "test") return;
-  const aiMode = useTerminal.getState().aiControl;
+  const terminal = useTerminal.getState();
+  const aiMode = terminal.aiControl;
   if (aiMode === "off") return;
-  if (aiMode === "control" && candidateKind === "other") return;
+  if (aiMode === "control" && candidateKind === "other") {
+    terminal.setAiProposal(null);
+    aiLastPollAt = 0;
+    return;
+  }
   if (snap.source !== "live") return;
   const now = Date.now();
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;

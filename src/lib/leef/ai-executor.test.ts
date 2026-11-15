@@ -136,8 +136,8 @@ describe("buildAiQuestions", () => {
     const q = buildAiQuestions(s);
     const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
     expect(Object.keys(criteria)).toEqual(["hold", "swap"]);
-    expect(q[AI_QID.swapTokenIn as keyof typeof q]).toBeUndefined();
-    expect(q[AI_QID.swapTokenOut as keyof typeof q]).toBeUndefined();
+    expect(q["swap_token_in"]).toBeUndefined();
+    expect(q["swap_token_out"]).toBeUndefined();
   });
 
   it("includes engine-owned market regime, danger, portfolio and contract context", () => {

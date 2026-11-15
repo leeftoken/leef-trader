@@ -52,6 +52,7 @@ import {
   parseAiProposal,
   isAiProposalFresh,
   type AiCandidateKind,
+  type AiCandidateSummary,
   type AiProposal,
 } from "@/lib/leef/ai-executor";
 import { askJev } from "@/lib/leef/jev-client";
@@ -107,6 +108,7 @@ function maybeKickAiPoll(
   mode: "paper" | "live",
   candidateKind: AiCandidateKind,
   candidateKey: string,
+  candidateDetails: Omit<AiCandidateSummary, "kind" | "key">,
 ): void {
   if (import.meta.env.MODE === "test") return;
   const aiMode = useTerminal.getState().aiControl;
@@ -117,7 +119,7 @@ function maybeKickAiPoll(
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
-  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey);
+  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey, candidateDetails);
   const requestedAt = Date.now();
   void (async () => {
     try {
@@ -618,15 +620,40 @@ async function runBotOnceInner(
 
   const candidateKind: AiCandidateKind =
     decision.kind === "buy" ? "buy" : decision.kind === "swap" ? "swap" : "other";
+  const candidateDetails: Omit<AiCandidateSummary, "kind" | "key"> =
+    decision.kind === "buy"
+      ? {
+          tokenIn: b.quote || "WAX",
+          tokenOut: b.base || "LEEF",
+          amountIn: decision.amountIn,
+          amountUsd: decision.amountIn * (usdPriceOf(b.quote || "WAX", snap) || 0),
+          expectedOut: decision.route.amountOut,
+          expectedNetEdgePct: decision.edge?.netEdgePct,
+          priceImpactPct: decision.route.priceImpact * 100,
+          poolIds: decision.route.poolIds,
+          hops: decision.route.legs.length,
+        }
+      : decision.kind === "swap"
+        ? {
+            tokenIn: decision.tokenIn,
+            tokenOut: decision.tokenOut,
+            amountIn: decision.amountIn,
+            amountUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, snap) || 0),
+            expectedOut: decision.route.amountOut,
+            priceImpactPct: decision.route.priceImpact * 100,
+            poolIds: decision.route.poolIds,
+            hops: decision.route.legs.length,
+          }
+        : {};
   const candidateKey =
     decision.kind === "buy"
-      ? `buy:${b.quote || "WAX"}:${b.base || "LEEF"}:${routeSignature(decision.route)}`
+      ? `buy:${b.quote || "WAX"}:${b.base || "LEEF"}:${decision.amountIn.toPrecision(10)}:${routeSignature(decision.route)}`
       : decision.kind === "swap"
-        ? `swap:${decision.tokenIn}:${decision.tokenOut}:${routeSignature(decision.route)}`
+        ? `swap:${decision.tokenIn}:${decision.tokenOut}:${decision.amountIn.toPrecision(10)}:${routeSignature(decision.route)}`
         : "other";
   // Jev judges the exact candidate the deterministic engine actually produced.
-  // It cannot invent a different trade type, substitute a route, or create a trade from HOLD.
-  maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey);
+  // It cannot invent a different trade type, amount, token pair, route, or create a trade from HOLD.
+  maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
 
   b.setLastReason(decision.reason);
 

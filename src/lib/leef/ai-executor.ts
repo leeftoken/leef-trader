@@ -33,6 +33,8 @@ export interface AiProposal {
   candidateKind?: AiCandidateKind;
   /** Exact deterministic route candidate identity, not a model-generated value. */
   candidateKey?: string;
+  /** Code-owned candidate details used for the dry-run UI and audit. */
+  candidate?: AiCandidateSummary;
 }
 
 export interface AiCandidateSummary {
@@ -56,9 +58,8 @@ export interface AiProposalContext {
   model: string;
   candidateKind: AiCandidateKind;
   candidateKey: string;
+  candidate: AiCandidateSummary;
   allowedActions: readonly AiAction[];
-  candidatesIn: readonly string[];
-  candidatesOut: readonly string[];
 }
 
 /**
@@ -139,9 +140,6 @@ export interface AiSnapshotSummary {
   candidate: AiCandidateSummary;
   /** Actions permitted for this exact candidate; the parser enforces this set. */
   allowedActions: AiAction[];
-  /** Closed sets for swap arguments. The parser checks answers against them. */
-  candidatesIn: string[];
-  candidatesOut: string[];
 }
 
 /** Structural bot slice — avoids importing the Zustand store into this module. */
@@ -188,10 +186,6 @@ export function aiSummaryOf(
 ): AiSnapshotSummary {
   const quote = (b.quote || "WAX").toUpperCase();
   const base = (b.base || "LEEF").toUpperCase();
-  const held = Object.entries(balances)
-    .filter(([, n]) => Number.isFinite(n) && n > 0)
-    .map(([s]) => s.toUpperCase());
-
   const poolPricesUsd = snap.pools.map((p) => p.usdPerLeef ?? 0).filter((v) => v > 0);
   const regime = classifyRegime({ series: b.series ?? [], poolPricesUsd });
   const freshestAtMs = snapFreshAtMs(snap);
@@ -233,16 +227,13 @@ export function aiSummaryOf(
   const tokenUniverse = [...tokenMap.values()].sort((a, c) =>
     a.symbol.localeCompare(c.symbol) || a.contract.localeCompare(c.contract),
   );
-  const poolSymbols = new Set(tokenUniverse.map((t) => t.symbol));
-  const candidatesIn = [...new Set(held.filter((s) => poolSymbols.has(s)))].sort();
-  const candidatesOut = [...poolSymbols].sort();
   const allowedActions: AiAction[] =
     candidateKind === "buy"
       ? ["hold", "buy"]
       : candidateKind === "swap"
         ? ["hold", "swap"]
         : candidateKind === "preview"
-          ? ["hold", "buy", "swap"]
+          ? ["hold", "buy"]
           : ["hold"];
 
   const position = b.position;
@@ -308,8 +299,7 @@ export function aiSummaryOf(
     candidateKey,
     candidate: { kind: candidateKind, key: candidateKey, ...candidateDetails },
     allowedActions,
-    candidatesIn: candidatesIn.length > 0 ? candidatesIn : [quote],
-    candidatesOut: candidatesOut.length > 0 ? candidatesOut : [base, quote],
+
   };
 }
 
@@ -366,18 +356,6 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
         half: "50% — moderate clip.",
         full: "100% — full deployable amount, still subject to deterministic limits.",
       },
-    };
-  }
-  if (summary.allowedActions.includes("swap")) {
-    questions[AI_QID.swapTokenIn] = {
-      type: "choice",
-      instructions: "Choose the input token from state.candidatesIn. Never invent or rename a token.",
-      criteria: Object.fromEntries(summary.candidatesIn.map((t) => [t, "Spend " + t + "."])),
-    };
-    questions[AI_QID.swapTokenOut] = {
-      type: "choice",
-      instructions: "Choose the output token from state.candidatesOut. Never invent or rename a token.",
-      criteria: Object.fromEntries(summary.candidatesOut.map((t) => [t, "Receive " + t + "."])),
     };
   }
   return questions;
@@ -460,20 +438,15 @@ export function parseAiProposal(
   }
 
   if (action === "swap") {
-    const tin = choiceOf(answers, AI_QID.swapTokenIn);
-    const tout = choiceOf(answers, AI_QID.swapTokenOut);
-    if (!tin || !tout || tin.choice === tout.choice) return null;
-    if (
-      context &&
-      (!context.candidatesIn.includes(tin.choice) || !context.candidatesOut.includes(tout.choice))
-    ) return null;
-    params.tokenIn = tin.choice;
-    params.tokenOut = tout.choice;
-    judgments.push(
-      { qid: AI_QID.swapTokenIn, confidence: tin.confidence },
-      { qid: AI_QID.swapTokenOut, confidence: tout.confidence },
-    );
-    rationale.push(tin.choice + "→" + tout.choice);
+    // The token pair belongs to the deterministic candidate, never to Jev.
+    const candidate = context?.candidate;
+    if (!candidate?.tokenIn || !candidate.tokenOut || candidate.tokenIn === candidate.tokenOut) {
+      if (context) return null;
+    } else {
+      params.tokenIn = candidate.tokenIn;
+      params.tokenOut = candidate.tokenOut;
+      rationale.push(candidate.tokenIn + "→" + candidate.tokenOut);
+    }
   }
 
   rationale.push("exec_ok=" + execOk.toFixed(2), "stress=" + stress.toFixed(2));
@@ -495,6 +468,7 @@ export function parseAiProposal(
           model: context.model,
           candidateKind: context.candidateKind,
           candidateKey: context.candidateKey,
+          candidate: context.candidate,
         }
       : {}),
   };

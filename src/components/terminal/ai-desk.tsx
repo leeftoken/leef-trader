@@ -503,7 +503,8 @@ export function AiDesk({ snap }: { snap: LeefSnapshot }) {
 
         {!aiEnabled ? (
           <div className="mt-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            AI is OFF — zero calls leave this browser. <span className="font-medium">SUGGEST</span>:
+            The AI helper gateway is OFF — no requests are sent to it. Jev has a separate
+            control setting in the trade-control panel. <span className="font-medium">SUGGEST</span>:
             analyst on demand, learning artifacts shadow until you promote them.{" "}
             <span className="font-medium">CONTROLLED</span>: the deterministic governor may
             auto-promote artifacts that beat their baseline on fresh evidence. Trading never

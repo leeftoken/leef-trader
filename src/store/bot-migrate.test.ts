@@ -4,14 +4,14 @@ import { useBot } from "./bot";
 type Migrated = {
   goals: { maxDrawdownPct: number; maxDailyLossPct: number; takeProfitPct: number };
   risk: { maxTradesHour: number; cooldownSec: number; maxPoolSharePct: number; maxImpactPct: number };
-  stats: { trades: number; closedTrades: number; wins: number; realizedUsd: number };
+  stats: { trades: number; closedTrades: number; wins: number; realizedUsd: number; liveWins: number; liveClosedTrades: number; paperWins: number; paperClosedTrades: number };
   riskMigrationNotice: string | null;
 };
 
 const migrate = (blob: unknown, version: number) =>
   useBot.persist.getOptions().migrate!(blob, version) as Migrated;
 
-describe("bot store v13 migration", () => {
+describe("bot store v14 migration", () => {
   it("v12 blob with legacy defaults gets the safer defaults + a notice, other settings kept", () => {
     const out = migrate(
       {
@@ -30,14 +30,18 @@ describe("bot store v13 migration", () => {
     expect(out.riskMigrationNotice).toMatch(/Safer risk defaults/);
   });
 
-  it("v13 history keeps realized dollars but resets an unreliable win-rate denominator", () => {
+  it("v13 history keeps realized dollars but resets unreliable win-rate counters", () => {
     const out = migrate(
-      { stats: { trades: 20, wins: 7, realizedUsd: 42 } },
+      { stats: { trades: 20, wins: 7, closedTrades: 7, liveWins: 5, liveClosedTrades: 6, paperWins: 2, paperClosedTrades: 2, realizedUsd: 42 } },
       13,
     );
     expect(out.stats.trades).toBe(20);
     expect(out.stats.closedTrades).toBe(0);
     expect(out.stats.wins).toBe(0);
+    expect(out.stats.liveWins).toBe(0);
+    expect(out.stats.liveClosedTrades).toBe(0);
+    expect(out.stats.paperWins).toBe(0);
+    expect(out.stats.paperClosedTrades).toBe(0);
     expect(out.stats.realizedUsd).toBe(42);
   });
 

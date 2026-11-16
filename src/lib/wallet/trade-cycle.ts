@@ -80,7 +80,43 @@ type Lock = {
   since: number;
 };
 
-let lock: Lock = { phase: "idle", since: 0 };
+export const TRADE_CYCLE_STORAGE_KEY = "leef-live-capital-lock-v1";
+
+function readSavedLock(): Lock {
+  try {
+    if (typeof localStorage === "undefined") return { phase: "idle", since: 0 };
+    const raw = localStorage.getItem(TRADE_CYCLE_STORAGE_KEY);
+    if (!raw) return { phase: "idle", since: 0 };
+    const saved = JSON.parse(raw) as Partial<Lock>;
+    if (!Number.isFinite(saved.since) || typeof saved.since !== "number") {
+      return { phase: "blocked", since: Date.now() };
+    }
+    if (typeof saved.txid === "string" && /^[a-f0-9]{64}$/i.test(saved.txid)) {
+      return { phase: "unknown", txid: saved.txid, since: saved.since };
+    }
+    // A reload during signing may have happened after broadcast but before
+    // the wallet returned its txid. Block new capital use until reviewed.
+    return { phase: "blocked", since: saved.since };
+  } catch {
+    return { phase: "blocked", since: Date.now() };
+  }
+}
+
+function persistLock(next: Lock): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (next.phase === "idle" || next.phase === "failed") {
+      localStorage.removeItem(TRADE_CYCLE_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(TRADE_CYCLE_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Storage can be unavailable in private or restricted browser contexts.
+    // The in-memory lock still protects this tab.
+  }
+}
+
+let lock: Lock = readSavedLock();
 let lastTimings: CycleTimings = emptyTimings();
 
 export function lastCycleTimings(): CycleTimings {
@@ -113,35 +149,53 @@ export function liveCapitalBlocked(): boolean {
 export function beginSigning(): boolean {
   if (liveCapitalBlocked()) return false;
   lock = { phase: "signing", since: Date.now() };
+  persistLock(lock);
   return true;
 }
 
 export function markBroadcast(txid: string): void {
   lock = { phase: "broadcasted", txid, since: Date.now() };
+  persistLock(lock);
 }
 
 export function markReconciling(txid: string): void {
   lock = { phase: "reconciling", txid, since: Date.now() };
+  persistLock(lock);
 }
 
 export function markConfirmed(): void {
   lock = { phase: "idle", since: Date.now() };
+  persistLock(lock);
 }
 
 export function markFailed(): void {
   lock = { phase: "idle", since: Date.now() };
+  persistLock(lock);
 }
 
 /** Capital may have moved. Do not retry. Keep the txid. */
 export function markUnknown(txid: string): void {
   lock = { phase: "unknown", txid, since: Date.now() };
+  persistLock(lock);
 }
 
 export function abortSigning(): void {
-  if (lock.phase === "signing") lock = { phase: "idle", since: Date.now() };
+  if (lock.phase === "signing") {
+    lock = { phase: "idle", since: Date.now() };
+    persistLock(lock);
+  }
 }
 
 export function unknownBlockReason(): string | null {
+  if (lock.phase === "blocked" && !lock.txid) {
+    return "A prior signing attempt was interrupted by reload — inspect wallet activity before submitting another trade";
+  }
   if (lock.phase !== "unknown" || !lock.txid) return null;
-  return `Previous tx ${lock.txid.slice(0, 10)}… is UNKNOWN — not submitting another trade until it reconciles`;
+  return `Previous tx ${lock.txid.slice(0, 10)}… is UNKNOWN / unresolved — not submitting another trade until settlement is reconciled`;
+}
+
+/** Refresh the in-memory guard from browser storage (also useful after app mount). */
+export function restoreTradeCycleLock(): TradePhase {
+  lock = readSavedLock();
+  return lock.phase;
 }

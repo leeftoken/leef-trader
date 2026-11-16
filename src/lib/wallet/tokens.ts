@@ -1,5 +1,4 @@
 import type { LeefSnapshot } from "@/lib/leef/types";
-import { trustedStablePreference } from "@/lib/market/stables";
 
 export type TokenMeta = {
   symbol: string;
@@ -28,11 +27,18 @@ export function tokenCatalog(
   for (const t of BASE) map.set(key(t.symbol, t.contract), t);
   const put = (symbol: string, contract: string, decimals: number) => {
     const s = symbol.toUpperCase();
-    if (!s || !contract || map.has(key(s, contract))) return;
+    if (
+      !s ||
+      !contract ||
+      !Number.isInteger(decimals) ||
+      decimals < 0 ||
+      decimals > 18 ||
+      map.has(key(s, contract))
+    ) return;
     map.set(key(s, contract), {
       symbol: s,
       contract,
-      decimals: decimals || 4,
+      decimals,
       alcorId: `${s.toLowerCase()}-${contract}`,
     });
   };
@@ -63,15 +69,6 @@ export function metaOf(
   if (exact) return exact;
   const matches = catalog.filter((t) => t.symbol === up);
   if (matches.length === 1) return matches[0]!;
-  if (matches.length > 1) {
-    // Bare symbol with several contracts: deterministic tiebreak toward the
-    // preferred trusted stable (registry order), never arbitrary order.
-    // Anything else stays fail-closed (ambiguity must be explicit).
-    const trusted = matches
-      .filter((t) => trustedStablePreference(t.symbol, t.contract) !== Number.POSITIVE_INFINITY)
-      .sort((a, b) => trustedStablePreference(a.symbol, a.contract) - trustedStablePreference(b.symbol, b.contract));
-    if (trusted.length > 0) return trusted[0]!;
-  }
   throw new Error(
     matches.length > 1
       ? `${up} is ambiguous — select SYMBOL@CONTRACT`

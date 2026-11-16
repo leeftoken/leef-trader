@@ -205,10 +205,14 @@ export type StrategyEvidence = {
   confirmed: number;
   unknown: number;
   paper: number;
-  /** Settled outcome-bearing trades; excludes entry legs and unresolved txs. */
+  /** Settled closed outcomes; excludes entry legs and unresolved transactions. */
   closedTrades: number;
   wins: number;
   pnlUsd: number;
+  liveWins: number;
+  livePnlUsd: number;
+  paperWins: number;
+  paperPnlUsd: number;
   predEdgePctSum: number;
   predN: number;
   realEdgePctSum: number;
@@ -268,6 +272,10 @@ function blankStrategyEvidence(strategy: string): StrategyEvidence {
     closedTrades: 0,
     wins: 0,
     pnlUsd: 0,
+    liveWins: 0,
+    livePnlUsd: 0,
+    paperWins: 0,
+    paperPnlUsd: 0,
     predEdgePctSum: 0,
     predN: 0,
     realEdgePctSum: 0,
@@ -339,19 +347,31 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
         // Self-impact follow-up entries are observations, not new executions.
         if (e.amountIn == null && e.expectedOut == null && e.selfImpactPct != null) break;
         s.executions += 1;
-        if (e.status === "confirmed" || e.status === "included") s.confirmed += 1;
-        if (e.status === "unknown") s.unknown += 1;
-        if (e.status === "paper") s.paper += 1;
+        // Only transfer-reconciled LIVE fills and modeled PAPER fills have a
+        // settled outcome. RPC inclusion alone is not a fill; UNKNOWN/INCLUDED
+        // rows must never contribute estimated router P&L or win counts.
+        if (e.status === "confirmed") s.confirmed += 1;
+        else if (e.status === "paper") s.paper += 1;
+        else if (e.status === "unknown" || e.status === "included") s.unknown += 1;
         const hasSettledOutcome =
           e.pnlUsd != null &&
           Number.isFinite(e.pnlUsd) &&
           (e.status === "confirmed" || e.status === "paper") &&
           (e.action === "sell" || e.action === "arb" || e.action === "swap");
         if (hasSettledOutcome) {
+          const pnl = e.pnlUsd!;
           s.closedTrades += 1;
-          if (e.pnlUsd! > 0) s.wins += 1;
+          if (pnl > 0) s.wins += 1;
+          s.pnlUsd += pnl;
+          if (e.status === "confirmed" && e.mode === "live") {
+            if (pnl > 0) s.liveWins += 1;
+            s.livePnlUsd += pnl;
+          }
+          if (e.status === "paper" && e.mode === "paper") {
+            if (pnl > 0) s.paperWins += 1;
+            s.paperPnlUsd += pnl;
+          }
         }
-        if (hasSettledOutcome) s.pnlUsd += e.pnlUsd!;
         break;
       }
       case "calibration":

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetDelta, hyperionTxVerdict, parseHyperionTransfers } from "./reconcile";
+import { assetDelta, hyperionTxVerdict, matchesExactDebit, parseHyperionTransfers } from "./reconcile";
 import { quorumTxStatus, waxResourceBlock } from "./chain";
 
 const ACCOUNT = "trader.leef";
@@ -155,9 +155,14 @@ describe("hyperionTxVerdict (M2 — failed verdicts need ≥2 agreeing indexers)
     expect(hyperionTxVerdict("t", [failed, null, failed])).toMatchObject({ status: "failed" });
   });
 
-  it("executed stays single-source and wins over failed reports", () => {
-    expect(hyperionTxVerdict("t", [good])).toMatchObject({ status: "confirmed" });
-    expect(hyperionTxVerdict("t", [failed, good])).toMatchObject({ status: "confirmed" });
+  it("does not call an executed transaction settled until transfers are parsed", () => {
+    expect(hyperionTxVerdict("t", [good])).toBeNull();
+    expect(hyperionTxVerdict("t", [failed, good])).toBeNull();
+    const withTransfers = {
+      executed: true,
+      transfers: parseHyperionTransfers(SWAP_TX)!.transfers,
+    };
+    expect(hyperionTxVerdict("t", [withTransfers])).toMatchObject({ status: "confirmed" });
   });
 
   it("nothing parsed → null", () => {
@@ -180,5 +185,25 @@ describe("waxResourceBlock", () => {
 
   it("does not block near-but-under thresholds", () => {
     expect(waxResourceBlock(0.95, 0.98, 0.98)).toBeNull();
+  });
+});
+
+describe("matchesExactDebit", () => {
+  it("accepts the requested full debit within one raw token unit", () => {
+    expect(matchesExactDebit(-10, 10, 8)).toBe(true);
+    expect(matchesExactDebit(-9.99999999, 10, 8)).toBe(true);
+  });
+
+  it("rejects partial fills and wrong-direction transfers", () => {
+    expect(matchesExactDebit(-9.999, 10, 8)).toBe(false);
+    expect(matchesExactDebit(10, 10, 8)).toBe(false);
+    expect(matchesExactDebit(0, 10, 8)).toBe(false);
+  });
+
+  it("rejects invalid decimal metadata or amounts", () => {
+    expect(matchesExactDebit(-10, 10, 19)).toBe(false);
+    expect(matchesExactDebit(-10, 10, -1)).toBe(false);
+    expect(matchesExactDebit(-10, 0, 8)).toBe(false);
+    expect(matchesExactDebit(Number.NaN, 10, 8)).toBe(false);
   });
 });

@@ -40,6 +40,26 @@ describe("aggregateEntries", () => {
     expect(s.topGateFails).toEqual([]);
   });
 
+  it("excludes included and unknown router estimates from realized performance", () => {
+    const entries: JournalEntry[] = [
+      e({ ts: 1, kind: "execution", strategy: "auto", action: "sell", status: "included", pnlUsd: 99 }),
+      e({ ts: 2, kind: "execution", strategy: "auto", action: "sell", status: "unknown", pnlUsd: 88 }),
+      e({ ts: 3, kind: "execution", strategy: "auto", action: "sell", mode: "live", status: "confirmed", pnlUsd: -2 }),
+      e({ ts: 4, kind: "execution", strategy: "auto", action: "sell", mode: "paper", status: "paper", pnlUsd: 1 }),
+    ];
+    const result = aggregateEntries(entries).byStrategy[0]!;
+    expect(result.executions).toBe(4);
+    expect(result.confirmed).toBe(1);
+    expect(result.unknown).toBe(2);
+    expect(result.paper).toBe(1);
+    expect(result.wins).toBe(1);
+    expect(result.pnlUsd).toBe(-1);
+    expect(result.liveWins).toBe(0);
+    expect(result.livePnlUsd).toBe(-2);
+    expect(result.paperWins).toBe(1);
+    expect(result.paperPnlUsd).toBe(1);
+  });
+
   it("aggregates decisions, gates, executions and calibration per strategy", () => {
     const entries: JournalEntry[] = [
       e({ ts: 100, kind: "decision", strategy: "auto", decision: "hold", reason: "no edge" }),
@@ -47,8 +67,8 @@ describe("aggregateEntries", () => {
       e({ ts: 300, kind: "gate", strategy: "auto", gate: "entry", pass: false, reason: "exact net edge -0.4% < required 0.3%" }),
       e({ ts: 400, kind: "gate", strategy: "auto", gate: "entry", pass: false, reason: "exact net edge -1.1% < required 0.3%" }),
       e({ ts: 500, kind: "gate", strategy: "auto", gate: "entry", pass: true, expectedOut: 120 }),
-      e({ ts: 600, kind: "execution", strategy: "auto", action: "buy", status: "paper", pnlUsd: 0 }),
-      e({ ts: 700, kind: "execution", strategy: "auto", action: "sell", status: "confirmed", pnlUsd: 0.42, txid: "abc" }),
+      e({ ts: 600, kind: "execution", strategy: "auto", action: "buy", mode: "paper", status: "paper", pnlUsd: 0 }),
+      e({ ts: 700, kind: "execution", strategy: "auto", action: "sell", mode: "live", status: "confirmed", pnlUsd: 0.42, txid: "abc" }),
       e({ ts: 800, kind: "calibration", strategy: "auto", predEdgePct: 0.8, realEdgePct: 0.55, pnlUsd: 0.42 }),
       e({ ts: 900, kind: "decision", strategy: "growth", decision: "error", reason: "RPC timeout" }),
     ];
@@ -63,7 +83,6 @@ describe("aggregateEntries", () => {
     expect(auto.gatePass).toBe(1);
     expect(auto.gateFail).toBe(2);
     expect(auto.executions).toBe(2);
-    expect(auto.closedTrades).toBe(1);
     expect(auto.paper).toBe(1);
     expect(auto.confirmed).toBe(1);
     expect(auto.wins).toBe(1);
@@ -79,19 +98,6 @@ describe("aggregateEntries", () => {
     expect(s.topGateFails).toHaveLength(1);
     expect(s.topGateFails[0]!.count).toBe(2);
     expect(s.topGateFails[0]!.reason).toContain("#");
-  });
-
-  it("does not count included or unknown estimated outcomes as settled P&L", () => {
-    const s = aggregateEntries([
-      e({ kind: "execution", action: "sell", strategy: "auto", status: "included", pnlUsd: 99 }),
-      e({ kind: "execution", action: "arb", strategy: "auto", status: "unknown", pnlUsd: 50 }),
-      e({ kind: "execution", action: "sell", strategy: "auto", status: "confirmed", pnlUsd: -2 }),
-    ]);
-    const auto = s.byStrategy.find((x) => x.strategy === "auto")!;
-    expect(auto.executions).toBe(3);
-    expect(auto.closedTrades).toBe(1);
-    expect(auto.wins).toBe(0);
-    expect(auto.pnlUsd).toBe(-2);
   });
 
   it("buckets entries without a strategy under a placeholder", () => {

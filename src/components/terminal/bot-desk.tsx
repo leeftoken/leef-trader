@@ -60,6 +60,8 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal } from "@/lib/leef/journal";
+import { liveCapitalBlocked, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 
 const KIND_VARIANT: Record<
   BotDecisionLog["kind"],
@@ -94,13 +96,34 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const [confirmLive, setConfirmLive] = useState(false);
   const [confirmForce, setConfirmForce] = useState<"buy" | "sell" | null>(null);
   const [busyForce, setBusyForce] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryResult, setRecoveryResult] = useState<ReconcileResult | null>(null);
+  const unresolvedTxid = pendingTxid();
+  const unresolvedPhase = tradePhase();
+  const hasRecoveryLock = liveCapitalBlocked();
+
+  async function inspectPendingSettlement() {
+    if (!unresolvedTxid || recoveryBusy) return;
+    setRecoveryBusy(true);
+    try {
+      const result = await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 });
+      setRecoveryResult(result);
+      if (result.status === "failed") markFailed();
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
 
   const liveReady = mode === "live" && (hasSecret() || hasWalletSession());
   const liveBook = snap.source === "live";
   const warmup = Math.min(b.series.length, BOT_WARMUP_POINTS);
 
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
-  const winRate = b.stats.closedTrades > 0 ? b.stats.wins / b.stats.closedTrades : null;
+  const liveClosedTrades = Math.max(0, Number(b.stats.liveClosedTrades) || 0);
+  const liveWinRate = liveClosedTrades > 0 ? (Number(b.stats.liveWins) || 0) / liveClosedTrades : null;
+  const liveRealizedUsd = Number(b.stats.liveRealizedUsd) || 0;
+  const paperClosedTrades = Math.max(0, Number(b.stats.paperClosedTrades) || 0);
+  const paperRealizedUsd = Number(b.stats.paperRealizedUsd) || 0;
 
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
   const flowGuardEnabled = useTerminal((s) => s.flowGuardEnabled);
@@ -189,6 +212,46 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           </Badge>
         </div>
       </div>
+
+      {hasRecoveryLock && (
+        <Card className="border-amber-500/40 bg-amber-500/5 p-3 sm:p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">Live trade recovery · capital locked</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {unresolvedTxid
+                  ? `Transaction ${unresolvedTxid.slice(0, 12)}… is ${unresolvedPhase}. Inspect chain settlement before resuming.`
+                  : "A signing attempt was interrupted before a transaction ID was saved. Check wallet activity before trading again."}
+              </p>
+            </div>
+            {unresolvedTxid && (
+              <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
+                {recoveryBusy ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <ScanSearch className="mr-2 size-3.5" />}
+                Inspect settlement
+              </Button>
+            )}
+          </div>
+          {recoveryResult && (
+            <div className="mt-3 rounded-md border border-border/60 bg-background/70 p-3">
+              <div className="text-xs font-medium">
+                {recoveryResult.status === "confirmed" ? "Transfer evidence found — position still requires reconciliation" : recoveryResult.status === "failed" ? "Failure independently confirmed — capital lock released" : "Still unresolved — capital remains locked"}
+              </div>
+              {recoveryResult.status === "confirmed" && (
+                <div className="mt-2 space-y-1">
+                  {recoveryResult.transfers.map((transfer, index) => (
+                    <div key={`${transfer.contract}-${index}`} className="flex flex-wrap justify-between gap-x-3 text-[11px] text-muted-foreground">
+                      <span>{transfer.from} → {transfer.to} · {transfer.contract}</span>
+                      <span className="font-mono">{transfer.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {recoveryResult.status === "failed" && <p className="mt-1 text-[11px] text-muted-foreground">{recoveryResult.error}</p>}
+              <p className="mt-2 text-[11px] text-muted-foreground">This inspector never retries a transaction. A lock is released only when the chain failure is independently confirmed; successful transfers remain locked until position accounting is reconciled.</p>
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card className="p-3 sm:p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -395,42 +458,76 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
             <p className="mb-3 text-xs text-muted-foreground">
               {strat.detail}
             </p>
-            <div className="flex flex-col gap-2">
-              {STRATEGIES.map((s) => {
-                const on = s.id === b.strategy;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    disabled={b.running}
-                    onClick={() => b.setStrategy(s.id)}
-                    className={cn(
-                      "flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                      on
-                        ? "border-accent/40 bg-accent/10"
-                        : "border-border bg-background text-muted-foreground hover:text-foreground",
-                      b.running && "opacity-60",
-                    )}
-                  >
-                    <span>
-                      <span className={cn("block text-sm", on && "text-foreground")}>
-                        {s.name}
+            <button
+              type="button"
+              disabled={b.running}
+              onClick={() => b.setStrategy("auto")}
+              className={cn(
+                "mb-3 flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors",
+                b.strategy === "auto"
+                  ? "border-leef/50 bg-leef/10"
+                  : "border-border bg-background hover:border-leef/40",
+                b.running && "opacity-60",
+              )}
+            >
+              <span>
+                <span className="block text-sm font-semibold">Auto · recommended starting mode</span>
+                <span className="block text-xs text-muted-foreground">
+                  The engine ranks eligible strategy candidates using live costs, route quality and risk gates
+                </span>
+              </span>
+              <Badge variant={b.strategy === "auto" ? "leef" : "plain"}>
+                {b.strategy === "auto" ? "Active" : "Select"}
+              </Badge>
+            </button>
+            <details className="rounded-lg border border-border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
+                Specialist strategies ({STRATEGIES.length - 1})
+              </summary>
+              <div className="mt-3 flex flex-col gap-2">
+                {STRATEGIES.filter((strategy) => strategy.id !== "auto").map((s) => {
+                  const on = s.id === b.strategy;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      disabled={b.running}
+                      onClick={() => b.setStrategy(s.id)}
+                      className={cn(
+                        "flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                        on
+                          ? "border-accent/40 bg-accent/10"
+                          : "border-border bg-background text-muted-foreground hover:text-foreground",
+                        b.running && "opacity-60",
+                      )}
+                    >
+                      <span>
+                        <span className={cn("block text-sm", on && "text-foreground")}>
+                          {s.name}
+                        </span>
+                        <span className="block text-xs text-subtle">{s.tagline}</span>
                       </span>
-                      <span className="block text-xs text-subtle">{s.tagline}</span>
-                    </span>
-                    <span className="hidden min-[420px]:inline-flex">
-                      <Badge variant={on ? "accent" : "plain"}>{s.bestFor}</Badge>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                      <span className="hidden min-[420px]:inline-flex">
+                        <Badge variant={on ? "accent" : "plain"}>{s.bestFor}</Badge>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
           </Card>
 
-          {b.strategy !== "unleashed" && <GoalsCard />}
-          {b.strategy !== "unleashed" && b.strategy !== "growth" && <AdvisorCard snap={snap} />}
-          {b.strategy === "growth" && <TreasureCard snap={snap} />}
-          <RiskCard strategy={b.strategy} snap={snap} />
+          <details className="rounded-xl border border-border p-3">
+            <summary className="cursor-pointer text-sm font-semibold">
+              Goals, pair guidance and risk settings
+            </summary>
+            <div className="mt-4 flex flex-col gap-5">
+              {b.strategy !== "unleashed" && <GoalsCard />}
+              {b.strategy !== "unleashed" && b.strategy !== "growth" && <AdvisorCard snap={snap} />}
+              {b.strategy === "growth" && <TreasureCard snap={snap} />}
+              <RiskCard strategy={b.strategy} snap={snap} />
+            </div>
+          </details>
         </div>
 
         {/* ------------------------------ right rail ------------------------------ */}
@@ -506,18 +603,21 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               )}
             </Card>
             <Card className="p-4">
-              <div className="text-xs uppercase tracking-wider text-subtle">Session P&L</div>
+              <div className="text-xs uppercase tracking-wider text-subtle">Live realized P&L</div>
               <div
                 className={cn(
                   "mt-1 font-mono text-lg tabular-nums",
-                  b.stats.realizedUsd >= 0 ? "text-buy" : "text-sell",
+                  liveRealizedUsd >= 0 ? "text-buy" : "text-sell",
                 )}
               >
-                {b.stats.realizedUsd >= 0 ? "+" : ""}
-                {fmtUsd(b.stats.realizedUsd, 2)}
+                {liveRealizedUsd >= 0 ? "+" : ""}
+                {fmtUsd(liveRealizedUsd, 2)}
               </div>
               <div className="text-xs text-muted-foreground">
-                win rate {winRate == null ? "—" : `${(winRate * 100).toFixed(0)}%`} · {b.stats.closedTrades} completed
+                {liveWinRate == null ? "No settled live outcomes yet" : `win rate ${(liveWinRate * 100).toFixed(0)}%`} · {liveClosedTrades} closed
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Paper: {paperRealizedUsd >= 0 ? "+" : ""}{fmtUsd(paperRealizedUsd, 2)} · {paperClosedTrades} closed
               </div>
             </Card>
             <Card className="p-4">
@@ -537,7 +637,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                       ? ` · ${((b.stats.echoCostUsd / b.stats.volumeUsd) * 100).toFixed(2)}¢/$`
                       : ""}
                     {" · "}
-                    {b.stats.trades} executions · {fmtUsd(equityUsd, 2)}
+                    {b.stats.trades} clips · {fmtUsd(equityUsd, 2)}
                   </div>
                 </>
               ) : (
@@ -1013,9 +1113,14 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
   const rows = targetUnitPnl(snap, balances, targets, start);
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
   const startEq = useBot((s) => s.stats.startEquityUsd);
-  const trades = useBot((s) => s.stats.closedTrades);
-  const wins = useBot((s) => s.stats.wins);
-  const winRate = trades > 0 ? wins / trades : 0;
+  const liveClosedTrades = Math.max(0, Number(useBot((s) => s.stats.liveClosedTrades)) || 0);
+  const liveWins = Math.max(0, Number(useBot((s) => s.stats.liveWins)) || 0);
+  const liveRealizedUsd = Number(useBot((s) => s.stats.liveRealizedUsd)) || 0;
+  const paperClosedTrades = Math.max(0, Number(useBot((s) => s.stats.paperClosedTrades)) || 0);
+  const paperWins = Math.max(0, Number(useBot((s) => s.stats.paperWins)) || 0);
+  const paperRealizedUsd = Number(useBot((s) => s.stats.paperRealizedUsd)) || 0;
+  const liveWinRate = liveClosedTrades > 0 ? liveWins / liveClosedTrades : null;
+  const paperWinRate = paperClosedTrades > 0 ? paperWins / paperClosedTrades : null;
   const valueDelta = equityUsd - startEq;
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1038,13 +1143,19 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
         </Card>
       ))}
       <Card className="p-4">
-        <div className="text-xs uppercase tracking-wider text-subtle">Portfolio value</div>
+        <div className="text-xs uppercase tracking-wider text-subtle">Wallet value change</div>
         <div className={cn("mt-1 font-mono text-lg tabular-nums", valueDelta >= 0 ? "text-buy" : "text-sell")}>
           {valueDelta >= 0 ? "+" : ""}
           {fmtUsd(valueDelta, 2)}
         </div>
         <div className="text-xs text-muted-foreground">
-          {fmtUsd(equityUsd, 2)} · {trades} completed · {trades > 0 ? `${(winRate * 100).toFixed(0)}% win` : "win rate —"}
+          {fmtUsd(equityUsd, 2)} current wallet value · marked change includes unrealized exposure
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Live: {liveRealizedUsd >= 0 ? "+" : ""}{fmtUsd(liveRealizedUsd, 2)} · {liveWinRate == null ? "no settled outcomes" : `${(liveWinRate * 100).toFixed(0)}% wins`} · {liveClosedTrades} closed
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Paper: {paperRealizedUsd >= 0 ? "+" : ""}{fmtUsd(paperRealizedUsd, 2)} · {paperWinRate == null ? "no settled outcomes" : `${(paperWinRate * 100).toFixed(0)}% wins`} · {paperClosedTrades} closed
         </div>
       </Card>
     </div>

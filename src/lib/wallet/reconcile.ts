@@ -9,10 +9,10 @@
  * Fallback: Hyperion /v2/history/get_transaction (transfer parse).
  *
  * Statuses:
- *  - confirmed: the tx executed; transfers were parsed when available.
+ *  - confirmed: the tx executed AND transfer actions were parsed.
  *  - failed:    the tx is on-chain but did not execute (nothing moved).
- *  - unknown:   no node has it (yet). NEVER retry the trade on unknown —
- *               the tx may still land; retrying is how double spends happen.
+ *  - unknown:   inclusion may be known, but transfer evidence is not available.
+ *               NEVER treat inclusion-only as a completed fill. NEVER retry.
  */
 import { fetchJson } from "@/lib/fetchJson";
 import { getTransactionStatus } from "./chain";
@@ -84,6 +84,27 @@ export function parseHyperionTransfers(
  * Net balance delta for one token from the account's perspective:
  * incoming minus outgoing. Positive = received.
  */
+/**
+ * A positive output alone does not prove that the intended input amount was
+ * fully debited. Require an exact negative delta within one raw token unit.
+ */
+export function matchesExactDebit(
+  actualDelta: number,
+  expectedAmount: number,
+  decimals: number,
+): boolean {
+  if (
+    !Number.isFinite(actualDelta) ||
+    !Number.isFinite(expectedAmount) ||
+    expectedAmount <= 0 ||
+    !Number.isInteger(decimals) ||
+    decimals < 0 ||
+    decimals > 18
+  ) return false;
+  const oneRawUnit = 1 / 10 ** decimals;
+  return actualDelta < 0 && Math.abs(-actualDelta - expectedAmount) <= oneRawUnit + 1e-12;
+}
+
 export function assetDelta(
   transfers: TxTransfer[],
   account: string,
@@ -114,7 +135,7 @@ export function hyperionTxVerdict(
   parsed: ({ executed: boolean; transfers: TxTransfer[] } | null)[],
 ): ReconcileResult | null {
   const found = parsed.filter((p): p is { executed: boolean; transfers: TxTransfer[] } => p != null);
-  const good = found.find((p) => p.executed);
+  const good = found.find((p) => p.executed && p.transfers.length > 0);
   if (good) return { status: "confirmed", txid, transfers: good.transfers };
   if (found.filter((p) => !p.executed).length >= 2) {
     return { status: "failed", txid, error: "Transaction failed on-chain — nothing moved" };
@@ -153,9 +174,9 @@ async function hyperionOnce(txid: string): Promise<ReconcileResult | null> {
  * 1. RPC history status (block inclusion) — usually sub-second after land.
  * 2. Hyperion for transfer parse (needed for exact fill amounts).
  *
- * Default budget is short on the HOT path (~1.2s). Callers that need full
- * transfer reconciliation can pass a longer budget; the bot should NOT
- * hold the next-decision lock on Hyperion lag.
+ * Default budget is short on the HOT path (~1.2s). If RPC inclusion is
+ * visible before Hyperion transfer indexing, the result remains UNKNOWN.
+ * Callers must keep the capital lock and must not book estimated P&L.
  */
 export async function waitForTransaction(
   txid: string,
@@ -178,10 +199,9 @@ export async function waitForTransaction(
     const hyp = await hyperionOnce(txid);
     if (hyp) return hyp;
 
-    // Included but Hyperion hasn't indexed transfers yet — still a fill.
-    if (rpc === "executed") {
-      return { status: "confirmed", txid, transfers: [] };
-    }
+    // RPC inclusion without parsed transfers is not enough to settle a fill.
+    // Keep polling within this budget; if indexing still lags, return UNKNOWN
+    // so callers retain the capital lock and do not book the router estimate.
   }
   return { status: "unknown", txid };
 }
@@ -199,10 +219,8 @@ export async function reconcileTransfersLater(
   const budgetMs = Math.max(delayMs, opts?.budgetMs ?? 12_000);
   const startedAt = Date.now();
 
-  // The fast inclusion path can confirm a block before Hyperion has indexed
-  // the transfer actions. Poll history itself here; calling
-  // waitForTransaction once would return confirmed with [] immediately
-  // after RPC inclusion and would never actually reconcile the fill.
+  // RPC inclusion can precede Hyperion's indexing of token transfer actions.
+  // Poll history itself before treating the transaction as reconciled.
   for (let i = 0; i < attempts && Date.now() - startedAt < budgetMs; i += 1) {
     if (i > 0) await sleep(delayMs);
     const history = await hyperionOnce(txid);
@@ -210,8 +228,7 @@ export async function reconcileTransfersLater(
     if (history?.status === "confirmed" && history.transfers.length > 0) return history;
   }
 
-  // Preserve the authoritative transaction verdict, but an empty transfer
-  // list is deliberately not treated as a settled P&L observation.
+  // An empty transfer list is not evidence of a settled trade.
   return await waitForTransaction(txid, {
     attempts: 1,
     delayMs,

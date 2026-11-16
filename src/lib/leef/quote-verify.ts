@@ -199,8 +199,14 @@ export async function verifyExecutableRoute(opts: {
   // re-pick a different ≤3-hop path whose executed legs diverge from the
   // evaluated ones — those verify leg-by-leg like mixed-venue routes.
   if (allAlcorRoute(opts.route) && !isCycle && opts.route.legs.length <= 3) {
-    const tokenIn = metaOf(opts.route.tokenIn, opts.snap);
-    const tokenOut = metaOf(opts.route.tokenOut, opts.snap);
+    const tokenIn = metaOf(
+      opts.route.tokenInContract ? `${opts.route.tokenIn}@${opts.route.tokenInContract}` : opts.route.tokenIn,
+      opts.snap,
+    );
+    const tokenOut = metaOf(
+      opts.route.tokenOutContract ? `${opts.route.tokenOut}@${opts.route.tokenOutContract}` : opts.route.tokenOut,
+      opts.snap,
+    );
     try {
       const quote = await fetchAlcorRouteCached({
         tokenInId: tokenIn.alcorId,
@@ -273,8 +279,14 @@ export async function verifyExecutableRoute(opts: {
     const venue = venueOfLeg(leg);
     let amountOut: number;
     if (venue === "alcor") {
-      const tin = metaOf(leg.tokenIn, opts.snap);
-      const tout = metaOf(leg.tokenOut, opts.snap);
+      const tin = metaOf(
+        leg.tokenInContract ? `${leg.tokenIn}@${leg.tokenInContract}` : leg.tokenIn,
+        opts.snap,
+      );
+      const tout = metaOf(
+        leg.tokenOutContract ? `${leg.tokenOut}@${leg.tokenOutContract}` : leg.tokenOut,
+        opts.snap,
+      );
       const quote = await fetchAlcorRouteCached({
         tokenInId: tin.alcorId,
         tokenOutId: tout.alcorId,
@@ -338,7 +350,10 @@ export async function verifyExecutableRoute(opts: {
           `${venue} pair ${nativePoolId(leg.poolId)} has no fresh on-chain quote — not executable`,
         );
       }
-      const tin = metaOf(leg.tokenIn, opts.snap);
+      const tin = metaOf(
+        leg.tokenInContract ? `${leg.tokenIn}@${leg.tokenInContract}` : leg.tokenIn,
+        opts.snap,
+      );
       const aMatches =
         pair.tokenA.symbol.toUpperCase() === tin.symbol && pair.tokenA.contract === tin.contract;
       const bMatches =
@@ -362,7 +377,10 @@ export async function verifyExecutableRoute(opts: {
         );
       }
       amountOut = q.amountOut;
-      const tout = metaOf(leg.tokenOut, opts.snap);
+      const tout = metaOf(
+        leg.tokenOutContract ? `${leg.tokenOut}@${leg.tokenOutContract}` : leg.tokenOut,
+        opts.snap,
+      );
       // Dust-safe ask (waxterminal roundingSafeMin): below ~1000 raw units of
       // expected output the memo asks for exactly 1 unit — a slippage-adjusted
       // ask at that size is precision noise the pool's rounding cannot honor,

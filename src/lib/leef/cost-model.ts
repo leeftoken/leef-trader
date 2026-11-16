@@ -104,8 +104,10 @@ export function executionCostPct(
   route: SwapRoute,
   snap: LeefSnapshot,
 ): number {
-  const inUsd = usdPriceOf(route.tokenIn, snap);
-  const outUsd = usdPriceOf(route.tokenOut, snap);
+  const inId = route.tokenInContract ? `${route.tokenIn}@${route.tokenInContract}` : route.tokenIn;
+  const outId = route.tokenOutContract ? `${route.tokenOut}@${route.tokenOutContract}` : route.tokenOut;
+  const inUsd = usdPriceOf(inId, snap);
+  const outUsd = usdPriceOf(outId, snap);
   if (!(inUsd > 0) || !(outUsd > 0) || !(route.amountIn > 0)) return 0;
   const idealOut = (route.amountIn * inUsd) / outUsd;
   if (!(idealOut > 0)) return 0;

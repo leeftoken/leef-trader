@@ -94,11 +94,15 @@ function quoteEdge(edge: Edge, amountIn: number): QuoteLeg | null {
   if (!(amountIn > 0) || reserveIn < amountIn * MIN_RESERVE_MULT) return null;
   const q = quoteConstantProduct(amountIn, reserveIn, reserveOut, edge.fee);
   if (q.amountOut <= 0 || q.priceImpact >= MAX_IMPACT) return null;
+  const from = parseId(edge.from);
+  const to = parseId(edge.to);
   return {
     poolId: edge.poolId,
     pairName: edge.pairName,
     tokenIn: edge.fromSym,
     tokenOut: edge.toSym,
+    tokenInContract: from.contract,
+    tokenOutContract: to.contract,
     amountIn,
     amountOut: q.amountOut,
     feePct: edge.feePct,
@@ -140,6 +144,8 @@ function routeFromLegs(
     amountOut,
     tokenIn: first.tokenIn,
     tokenOut: last.tokenOut,
+    tokenInContract: first.tokenInContract,
+    tokenOutContract: last.tokenOutContract,
     feePct: feePct * 100,
     priceImpact: combineImpact(legs),
     executionPrice: amountIn > 0 ? amountOut / amountIn : 0,
@@ -280,9 +286,21 @@ export function resolveTokenId(
   symbol: string,
   graph: Map<TokenId, Edge[]>,
 ): TokenId | null {
-  const s = symbol.toUpperCase();
-  if (s === LEEF_SYMBOL) return leefId();
-  if (s === WAX_SYMBOL) return waxId();
+  const raw = symbol.trim();
+  const at = raw.indexOf("@");
+  const s = (at >= 0 ? raw.slice(0, at) : raw).toUpperCase();
+  if (s === LEEF_SYMBOL) {
+    return at < 0 || raw.slice(at + 1) === LEEF_CONTRACT ? leefId() : null;
+  }
+  if (s === WAX_SYMBOL) {
+    return at < 0 || raw.slice(at + 1) === WAX_CONTRACT ? waxId() : null;
+  }
+  if (at >= 0) {
+    const exact = tokenId(s, raw.slice(at + 1));
+    return graph.has(exact) || [...graph.values()].some((edges) => edges.some((edge) => edge.to === exact))
+      ? exact
+      : null;
+  }
   const matches: TokenId[] = [];
   for (const id of graph.keys()) {
     if (parseId(id).symbol === s) matches.push(id);
@@ -296,18 +314,9 @@ export function resolveTokenId(
     }
   }
   if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0]!;
-  // Prefer the node with the deepest outgoing reserves.
-  let best = matches[0]!;
-  let bestRes = 0;
-  for (const id of matches) {
-    const res = (graph.get(id) ?? []).reduce((s2, e) => s2 + e.reserveIn, 0);
-    if (res > bestRes) {
-      best = id;
-      bestRes = res;
-    }
-  }
-  return best;
+  // A ticker is not an asset identity on WAX. Never route an ambiguous
+  // symbol to whichever contract happens to have the deepest reserves.
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 type Path = { legs: QuoteLeg[]; tvl: number; vol: number };
@@ -585,6 +594,8 @@ function splitDirect(
   route.executionPrice = best.out / amountIn;
   route.tokenIn = parseId(from).symbol;
   route.tokenOut = parseId(to).symbol;
+  route.tokenInContract = parseId(from).contract;
+  route.tokenOutContract = parseId(to).contract;
   return route;
 }
 
@@ -790,7 +801,14 @@ export function bestExecutionRoutePreferLeef(
   );
 }
 
-export type SplitSlice = { amountIn: number; tokenIn: string; tokenOut: string; poolId: number };
+export type SplitSlice = {
+  amountIn: number;
+  tokenIn: string;
+  tokenOut: string;
+  tokenInContract?: string;
+  tokenOutContract?: string;
+  poolId: number;
+};
 
 /** Parallel slices for a split route (live batch / paper multi-fill). */
 export function splitSlices(route: SwapRoute): SplitSlice[] | null {
@@ -799,6 +817,8 @@ export function splitSlices(route: SwapRoute): SplitSlice[] | null {
     amountIn: l.amountIn,
     tokenIn: l.tokenIn,
     tokenOut: l.tokenOut,
+    tokenInContract: l.tokenInContract,
+    tokenOutContract: l.tokenOutContract,
     poolId: l.poolId,
   }));
 }

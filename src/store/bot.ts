@@ -51,12 +51,18 @@ export type StrategyPerf = {
 };
 
 export type BotStats = {
-  /** Executed transaction count (entry + exit legs are separate executions). */
+  /** Submitted actions/executions; this is not the win-rate denominator. */
   trades: number;
-  /** Completed, settled trade outcomes. This is the win-rate denominator. */
+  /** Closed, settled outcomes with realized P&L. */
   closedTrades: number;
   wins: number;
   realizedUsd: number;
+  liveClosedTrades: number;
+  liveWins: number;
+  liveRealizedUsd: number;
+  paperClosedTrades: number;
+  paperWins: number;
+  paperRealizedUsd: number;
   /** Volume maker: gross USD notional cycled through the books. */
   volumeUsd: number;
   /** Volume maker: net USD cost of echo round trips (negative = profit). */
@@ -143,7 +149,7 @@ type BotState = {
   setPosition: (p: Position | null) => void;
   setGridAnchor: (usd: number | null) => void;
   bumpPositionHigh: (usd: number) => void;
-  recordResult: (pnlUsd: number, equityUsd: number) => void;
+  recordResult: (pnlUsd: number, equityUsd: number, mode: "live" | "paper") => void;
   recordVolume: (volumeUsd: number, costUsd: number) => void;
   /** Calibration: record one closed trade under the strategy that opened it.
    *  `mode` splits paper fills from live — paper never touches live calibration. */
@@ -173,6 +179,12 @@ const freshStats = (equityUsd: number): BotStats => ({
   closedTrades: 0,
   wins: 0,
   realizedUsd: 0,
+  liveClosedTrades: 0,
+  liveWins: 0,
+  liveRealizedUsd: 0,
+  paperClosedTrades: 0,
+  paperWins: 0,
+  paperRealizedUsd: 0,
   volumeUsd: 0,
   echoCostUsd: 0,
   lastPnlUsd: 0,
@@ -302,13 +314,27 @@ export const useBot = create<BotState>()(
             ? { position: { ...s.position, highUsd: usd } }
             : {},
         ),
-      recordResult: (pnlUsd, equityUsd) =>
+      recordResult: (pnlUsd, equityUsd, mode) =>
         set((s) => ({
           stats: {
             ...s.stats,
-            realizedUsd: s.stats.realizedUsd + pnlUsd,
-            closedTrades: s.stats.closedTrades + 1,
-            wins: s.stats.wins + (pnlUsd > 0 ? 1 : 0),
+            // Combined totals remain useful for wallet-wide session context.
+            // Mode-specific totals prevent a paper win being shown as live P&L.
+            realizedUsd: (s.stats.realizedUsd ?? 0) + pnlUsd,
+            closedTrades: (s.stats.closedTrades ?? 0) + 1,
+            wins: (s.stats.wins ?? 0) + (pnlUsd > 0 ? 1 : 0),
+            liveClosedTrades:
+              (s.stats.liveClosedTrades ?? 0) + (mode === "live" ? 1 : 0),
+            liveWins:
+              (s.stats.liveWins ?? 0) + (mode === "live" && pnlUsd > 0 ? 1 : 0),
+            liveRealizedUsd:
+              (s.stats.liveRealizedUsd ?? 0) + (mode === "live" ? pnlUsd : 0),
+            paperClosedTrades:
+              (s.stats.paperClosedTrades ?? 0) + (mode === "paper" ? 1 : 0),
+            paperWins:
+              (s.stats.paperWins ?? 0) + (mode === "paper" && pnlUsd > 0 ? 1 : 0),
+            paperRealizedUsd:
+              (s.stats.paperRealizedUsd ?? 0) + (mode === "paper" ? pnlUsd : 0),
             lastPnlUsd: pnlUsd,
             equity: [...s.stats.equity, { t: Date.now(), usd: equityUsd }].slice(-120),
           },
@@ -412,9 +438,8 @@ export const useBot = create<BotState>()(
       // below ({ ...freshStats(0), ...p.stats }) fills it for old saves.
       // v12: strategyHalt — persisted retry-storm halt flag (null for old saves).
       // v13: safer risk defaults.
-      // v14: separate executed transaction count from completed trade outcomes.
-      // Historical wins had no reliable closed-trade denominator, so old win
-      // counts are reset rather than displaying a fabricated win rate.
+      // v14: distinguish executed transactions from settled closed outcomes.
+      // Legacy win counters have no trustworthy denominator, so reset them.
       version: 14,
       migrate: (persisted, version) => {
         const p = (
@@ -477,6 +502,14 @@ export const useBot = create<BotState>()(
                       ? Math.max(0, (p.stats as BotStats).closedTrades)
                       : 0,
                   wins: version >= 14 ? Math.max(0, Number((p.stats as BotStats).wins) || 0) : 0,
+                  liveClosedTrades:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).liveClosedTrades) || 0) : 0,
+                  liveWins:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).liveWins) || 0) : 0,
+                  paperClosedTrades:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).paperClosedTrades) || 0) : 0,
+                  paperWins:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).paperWins) || 0) : 0,
                 }
               : freshStats(0),
           series: Array.isArray(p.series) ? p.series : [],

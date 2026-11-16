@@ -1757,15 +1757,36 @@ async function runBotOnceInner(
 
     if (decision.kind === "sell") {
       const position = b.position;
-      // Sell proceeds land in the CONFIGURED quote token (WAX by default) —
-      // the confirmed delta and the USD conversion must follow it, not WAX.
+      // Sell proceeds land in the CONFIGURED quote token (WAX by default).
       const sellQuoteMeta = metaOf(quoteTok, book);
       let quoteOut = decision.route.amountOut;
       let txid: string | undefined;
       let note = "";
       let feeInfo: { amount: number; symbol: string } | undefined;
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
+      let pnlSettled = !live;
       const t0 = Date.now();
+      const settleDelayedSell = (transfers: TxTransfer[]) => {
+        if (!position) return;
+        const actual = assetDelta(transfers, w.account, sellQuoteMeta.symbol, sellQuoteMeta.contract);
+        if (!(actual > 0)) return;
+        const settledPnl = actual * bounds.quoteUsd - position.entryCostUsd;
+        const state = useBot.getState();
+        state.recordResult(settledPnl, equityUsdOf(useWallet.getState().balances(), snap));
+        state.recordStrategyPerf(position.strategy ?? b.strategy, {
+          pnlUsd: settledPnl,
+          predEdgePct: position.predEdgePct ?? null,
+          realEdgePct: position.entryCostUsd > 0 ? (settledPnl / position.entryCostUsd) * 100 : 0,
+          latencyMs: Date.now() - t0,
+        }, mode);
+        journal({
+          kind: "calibration",
+          strategy: position.strategy ?? b.strategy,
+          pnlUsd: settledPnl,
+          realEdgePct: position.entryCostUsd > 0 ? (settledPnl / position.entryCostUsd) * 100 : 0,
+          reason: "Delayed sell transfer reconciliation",
+        });
+      };
       if (live) {
         if (!beginSigning()) return decision;
         const tSign = Date.now();
@@ -1793,15 +1814,18 @@ async function runBotOnceInner(
           }
           if (rec.status === "confirmed") {
             const actual = assetDelta(rec.transfers, w.account, sellQuoteMeta.symbol, sellQuoteMeta.contract);
-            if (actual > 0) quoteOut = actual;
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included (transfers pending)";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
+            if (actual > 0) {
+              quoteOut = actual;
+              pnlSettled = true;
+            }
+            note = pnlSettled ? " · confirmed on-chain" : " · included; waiting for exact transfer amounts";
+            execStatus = pnlSettled ? "confirmed" : "included";
             markConfirmed();
-            if (rec.transfers.length === 0) void reconcileTransfersLater(txid);
+            if (!pnlSettled) pollUnknown(txid, settleDelayedSell);
           } else {
             markUnknown(txid);
             note = " · broadcast, confirmation pending — not retrying";
-            void pollUnknown(txid);
+            pollUnknown(txid, settleDelayedSell);
           }
         } catch (err) {
           abortSigning();
@@ -1813,40 +1837,43 @@ async function runBotOnceInner(
         w.applyPaperFill(b.base || "LEEF", decision.amountLeef, b.quote || "WAX", quoteOut);
       }
       const pnlUsd = position ? quoteOut * bounds.quoteUsd - position.entryCostUsd : 0;
+      const canRecordResult = pnlSettled && !!position;
       b.setPosition(null);
       b.setGridAnchor(usdPriceOf(b.base || "LEEF", book) || snap.leefUsd);
       b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, pnlUsd));
-      b.recordResult(pnlUsd, equityUsd + pnlUsd);
-      // A successful execution breaks the consecutive-rejection run.
+      if (canRecordResult) {
+        b.recordResult(pnlUsd, equityUsd + pnlUsd);
+        b.recordStrategyPerf(position!.strategy ?? b.strategy, {
+          pnlUsd,
+          predEdgePct: position!.predEdgePct ?? null,
+          realEdgePct: position!.entryCostUsd > 0 ? (pnlUsd / position!.entryCostUsd) * 100 : 0,
+          latencyMs: live ? Date.now() - t0 : null,
+        }, mode);
+      } else if (live) {
+        b.setLastReason("Sell included — realized P&L is pending exact on-chain transfer reconciliation");
+      }
       b.clearRejectionStreak();
-      // Calibration: predicted edge (stored at entry) vs the realized edge.
-      b.recordStrategyPerf(position?.strategy ?? b.strategy, {
-        pnlUsd,
-        predEdgePct: position?.predEdgePct ?? null,
-        realEdgePct:
-          position && position.entryCostUsd > 0 ? (pnlUsd / position.entryCostUsd) * 100 : 0,
-        latencyMs: live ? Date.now() - t0 : null,
-      }, mode);
       b.pushDecision({
         kind: "sell",
         mode,
         reason: decision.reason + note,
         priceUsd: snap.leefUsd,
         txid,
-        pnlUsd,
+        pnlUsd: canRecordResult ? pnlUsd : undefined,
       });
       journal({
         kind: "execution", action: "sell", strategy: position?.strategy ?? b.strategy, mode,
         tokenIn: b.base || "LEEF", tokenOut: b.quote || "WAX",
         amountIn: decision.amountLeef, expectedOut: decision.route.amountOut,
-        actualOut: quoteOut, txid, status: execStatus, pnlUsd,
+        actualOut: pnlSettled ? quoteOut : undefined, txid, status: execStatus,
+        pnlUsd: canRecordResult ? pnlUsd : undefined,
         platformFeeAmount: feeInfo?.amount,
         platformFeeToken: feeInfo?.symbol,
         platformFeeCollected:
           live && execStatus === "confirmed" && feeInfo ? true : undefined,
         predEdgePct: position?.predEdgePct ?? undefined,
         realEdgePct:
-          position && position.entryCostUsd > 0
+          canRecordResult && position && position.entryCostUsd > 0
             ? (pnlUsd / position.entryCostUsd) * 100
             : undefined,
         latencyMs: live ? Date.now() - t0 : undefined,
@@ -1881,11 +1908,9 @@ async function runBotOnceInner(
         ctx: ctxOf(),
       });
       toast({
-        title: `${live ? "Live" : "Paper"} sell · ${fmtNum(quoteOut, { digits: 2 })} ${quoteTok} · ${
-          pnlUsd >= 0 ? "+" : ""
-        }$${pnlUsd.toFixed(2)}`,
+        title: `${live ? "Live" : "Paper"} sell · ${fmtNum(quoteOut, { digits: 2 })} ${quoteTok} · ${canRecordResult ? `${pnlUsd >= 0 ? "+" : ""}$${pnlUsd.toFixed(2)}` : "P&L pending"}`,
         description: decision.reason + note + (txid ? ` · tx ${txid.slice(0, 10)}…` : ""),
-        variant: pnlUsd < 0 ? "destructive" : "default",
+        variant: canRecordResult && pnlUsd < 0 ? "destructive" : "default",
       });
       return decision;
     }

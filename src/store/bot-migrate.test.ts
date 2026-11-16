@@ -4,6 +4,7 @@ import { useBot } from "./bot";
 type Migrated = {
   goals: { maxDrawdownPct: number; maxDailyLossPct: number; takeProfitPct: number };
   risk: { maxTradesHour: number; cooldownSec: number; maxPoolSharePct: number; maxImpactPct: number };
+  stats: { trades: number; closedTrades: number; wins: number; realizedUsd: number };
   riskMigrationNotice: string | null;
 };
 
@@ -27,6 +28,27 @@ describe("bot store v13 migration", () => {
     expect(out.risk.maxPoolSharePct).toBe(5);
     expect(out.risk.maxImpactPct).toBe(2);
     expect(out.riskMigrationNotice).toMatch(/Safer risk defaults/);
+  });
+
+  it("v13 history keeps realized dollars but resets an unreliable win-rate denominator", () => {
+    const out = migrate(
+      { stats: { trades: 20, wins: 7, realizedUsd: 42 } },
+      13,
+    );
+    expect(out.stats.trades).toBe(20);
+    expect(out.stats.closedTrades).toBe(0);
+    expect(out.stats.wins).toBe(0);
+    expect(out.stats.realizedUsd).toBe(42);
+  });
+
+  it("v14 completed-trade counters survive migration", () => {
+    const out = migrate(
+      { stats: { trades: 20, closedTrades: 8, wins: 5, realizedUsd: 42 } },
+      14,
+    );
+    expect(out.stats.trades).toBe(20);
+    expect(out.stats.closedTrades).toBe(8);
+    expect(out.stats.wins).toBe(5);
   });
 
   it("an explicit 0 saved AFTER v13 is respected", () => {

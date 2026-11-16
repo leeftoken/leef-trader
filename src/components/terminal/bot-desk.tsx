@@ -60,7 +60,7 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal } from "@/lib/leef/journal";
-import { liveCapitalBlocked, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { liveCapitalBlocked, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
 import { waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 
 const KIND_VARIANT: Record<
@@ -106,7 +106,9 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
     if (!unresolvedTxid || recoveryBusy) return;
     setRecoveryBusy(true);
     try {
-      setRecoveryResult(await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 }));
+      const result = await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 });
+      setRecoveryResult(result);
+      if (result.status === "failed") markFailed();
     } finally {
       setRecoveryBusy(false);
     }
@@ -232,7 +234,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           {recoveryResult && (
             <div className="mt-3 rounded-md border border-border/60 bg-background/70 p-3">
               <div className="text-xs font-medium">
-                {recoveryResult.status === "confirmed" ? "Transfer evidence found — position still requires reconciliation" : recoveryResult.status === "failed" ? "Chain reports transaction failure" : "Still unresolved — capital remains locked"}
+                {recoveryResult.status === "confirmed" ? "Transfer evidence found — position still requires reconciliation" : recoveryResult.status === "failed" ? "Failure independently confirmed — capital lock released" : "Still unresolved — capital remains locked"}
               </div>
               {recoveryResult.status === "confirmed" && (
                 <div className="mt-2 space-y-1">
@@ -245,7 +247,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 </div>
               )}
               {recoveryResult.status === "failed" && <p className="mt-1 text-[11px] text-muted-foreground">{recoveryResult.error}</p>}
-              <p className="mt-2 text-[11px] text-muted-foreground">This inspector is read-only. It never retries a transaction or releases the capital lock automatically.</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">This inspector never retries a transaction. A lock is released only when the chain failure is independently confirmed; successful transfers remain locked until position accounting is reconciled.</p>
             </div>
           )}
         </Card>

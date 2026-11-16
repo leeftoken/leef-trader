@@ -345,12 +345,13 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
         const hasSettledOutcome =
           e.pnlUsd != null &&
           Number.isFinite(e.pnlUsd) &&
+          (e.status === "confirmed" || e.status === "paper") &&
           (e.action === "sell" || e.action === "arb" || e.action === "swap");
         if (hasSettledOutcome) {
           s.closedTrades += 1;
           if (e.pnlUsd! > 0) s.wins += 1;
         }
-        s.pnlUsd += e.pnlUsd ?? 0;
+        if (hasSettledOutcome) s.pnlUsd += e.pnlUsd!;
         break;
       }
       case "calibration":

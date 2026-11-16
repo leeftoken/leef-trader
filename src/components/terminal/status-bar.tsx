@@ -1,13 +1,14 @@
 import { marketStats } from "@/lib/leef/analytics";
 import { fmtLeefLot, fmtNum, fmtUsd } from "@/lib/leef/format";
 import { headline } from "@/lib/leef/rank";
-import { snapFreshAtMs, type LeefSnapshot, type RankedPool } from "@/lib/leef/types";
+import { type LeefSnapshot, type RankedPool } from "@/lib/leef/types";
+import { measureSnapshotFreshness } from "@/lib/market/snapshot-freshness";
 import type { LiveTickState } from "./use-live-tick";
 import { useMarketEngine } from "@/hooks/useMarketEngine";
 import { cn } from "@/lib/utils";
 import { relTime, useNow } from "./use-now";
 import { VersionBanner } from "./version-banner";
-import { useTerminal } from "@/store/terminal";
+import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
 import { useAiControl } from "./ai-control";
 import { liveCapitalBlocked, pendingTxid, tradePhase, unknownBlockReason } from "@/lib/wallet/trade-cycle";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ export function StatusBar({
   const now = useNow();
   const engine = useMarketEngine();
   const setTab = useTerminal((s) => s.setTab);
+  const syncSec = useTerminal((s) => s.syncSec);
   const aiEnabled = useTerminal((s) => s.aiEnabled);
   const learningMode = useTerminal((s) => s.learningMode);
   const { mode: jevMode } = useAiControl();
@@ -35,10 +37,11 @@ export function StatusBar({
   const h = headline(ranked);
   const stats = marketStats(snap);
   const synced = relTime(snap.fetchedAt, now);
-  const rawSnapshotAgeSec = (now - snapFreshAtMs(snap)) / 1000;
+  const freshnessWindowMs = (clampSyncSec(syncSec ?? DEFAULT_SYNC_SEC) + 15) * 1_000;
+  const freshness = measureSnapshotFreshness(snap, freshnessWindowMs, now);
+  const rawSnapshotAgeSec = freshness.ageMs == null ? Number.NaN : freshness.ageMs / 1_000;
   const snapshotAgeSec = Math.max(0, rawSnapshotAgeSec);
-  const snapshotFresh =
-    Number.isFinite(rawSnapshotAgeSec) && rawSnapshotAgeSec >= 0 && rawSnapshotAgeSec <= 45;
+  const snapshotFresh = freshness.fresh;
   const marketDataState =
     snap.source === "unavailable"
       ? "NO DATA"

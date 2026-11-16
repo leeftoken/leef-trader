@@ -1930,11 +1930,9 @@ async function runBotOnceInner(
         const settledInUsd = actualIn * inPriceUsd;
         const settledOutUsd = actualOut * outPriceUsd;
         const settledPnl = settledOutUsd - settledInUsd;
-        if (isVolumeTape) {
-          const state = useBot.getState();
-          state.recordVolume(settledInUsd + settledOutUsd, -settledPnl);
-          state.recordResult(settledPnl, equityUsdOf(useWallet.getState().balances(), snap));
-        }
+        const state = useBot.getState();
+        if (isVolumeTape) state.recordVolume(settledInUsd + settledOutUsd, -settledPnl);
+        state.recordResult(settledPnl, equityUsdOf(useWallet.getState().balances(), snap));
       };
       if (live) {
         if (!beginSigning()) return decision;
@@ -1988,11 +1986,11 @@ async function runBotOnceInner(
       const tapePnl = outUsd - inUsd;
       b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, tapePnl));
       b.clearRejectionStreak();
-      if (isVolumeTape && pnlSettled) {
-        b.recordVolume(inUsd + outUsd, -tapePnl);
+      if (pnlSettled) {
+        if (isVolumeTape) b.recordVolume(inUsd + outUsd, -tapePnl);
         b.recordResult(tapePnl, equityUsd + tapePnl);
-      } else if (isVolumeTape && live) {
-        b.setLastReason("Swap included — realized tape P&L is pending exact on-chain transfer reconciliation");
+      } else if (live) {
+        b.setLastReason("Swap included — realized P&L is pending exact on-chain transfer reconciliation");
       }
       b.pushDecision({
         kind: "swap",

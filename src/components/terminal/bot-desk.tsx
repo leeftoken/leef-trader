@@ -98,7 +98,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const warmup = Math.min(b.series.length, BOT_WARMUP_POINTS);
 
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
-  const winRate = b.stats.trades > 0 ? b.stats.wins / b.stats.trades : 0;
+  const winRate = b.stats.closedTrades > 0 ? b.stats.wins / b.stats.closedTrades : null;
 
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
   /**
@@ -177,7 +177,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
             {b.running ? (liveReady ? "Live · running" : "Unsigned · running") : "Stopped"}
           </Badge>
           <Badge variant="plain">
-            {b.stats.trades} trades · {b.tradesThisHour}/{b.risk.maxTradesHour} this hour
+            {b.stats.trades} executions · {b.stats.closedTrades} closed · {b.tradesThisHour}/{b.risk.maxTradesHour} this hour
           </Badge>
           <Badge variant={b.stats.realizedUsd >= 0 ? "leef" : "sell"}>
             {b.stats.realizedUsd >= 0 ? "+" : ""}
@@ -454,7 +454,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 {fmtUsd(b.stats.realizedUsd, 2)}
               </div>
               <div className="text-xs text-muted-foreground">
-                win rate {(winRate * 100).toFixed(0)}% · {b.stats.trades} trades
+                win rate {winRate == null ? "—" : `${(winRate * 100).toFixed(0)}%`} · {b.stats.closedTrades} completed
               </div>
             </Card>
             <Card className="p-4">
@@ -474,7 +474,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                       ? ` · ${((b.stats.echoCostUsd / b.stats.volumeUsd) * 100).toFixed(2)}¢/$`
                       : ""}
                     {" · "}
-                    {b.stats.trades} clips · {fmtUsd(equityUsd, 2)}
+                    {b.stats.trades} executions · {fmtUsd(equityUsd, 2)}
                   </div>
                 </>
               ) : (
@@ -950,7 +950,7 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
   const rows = targetUnitPnl(snap, balances, targets, start);
   const equityUsd = markPortfolioUsd(snap, balances).totalUsd;
   const startEq = useBot((s) => s.stats.startEquityUsd);
-  const trades = useBot((s) => s.stats.trades);
+  const trades = useBot((s) => s.stats.closedTrades);
   const wins = useBot((s) => s.stats.wins);
   const winRate = trades > 0 ? wins / trades : 0;
   const valueDelta = equityUsd - startEq;
@@ -981,7 +981,7 @@ function GrowthPnlCards({ snap }: { snap: LeefSnapshot }) {
           {fmtUsd(valueDelta, 2)}
         </div>
         <div className="text-xs text-muted-foreground">
-          {fmtUsd(equityUsd, 2)} · {trades} trades · {(winRate * 100).toFixed(0)}% win
+          {fmtUsd(equityUsd, 2)} · {trades} completed · {trades > 0 ? `${(winRate * 100).toFixed(0)}% win` : "win rate —"}
         </div>
       </Card>
     </div>

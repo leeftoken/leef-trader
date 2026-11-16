@@ -70,7 +70,7 @@ export function TerminalHeader({
     return () => window.clearInterval(timer);
   }, []);
   const freshnessWindowMs = (clampSyncSec(syncSec ?? DEFAULT_SYNC_SEC) + 15) * 1_000;
-  const freshness = measureSnapshotFreshness(snap, freshnessWindowMs, now ?? Date.now());
+  const freshness = measureSnapshotFreshness(snap, freshnessWindowMs, now ?? Number.NaN);
   const ageSeconds = freshness.ageMs != null && freshness.ageMs >= 0
     ? Math.floor(freshness.ageMs / 1_000)
     : null;

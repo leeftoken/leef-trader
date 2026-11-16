@@ -5,12 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { marketStats } from "@/lib/leef/analytics";
 import { fmtUsd } from "@/lib/leef/format";
-import { snapFreshAtMs, type LeefSnapshot } from "@/lib/leef/types";
+import { type LeefSnapshot } from "@/lib/leef/types";
+import { measureSnapshotFreshness } from "@/lib/market/snapshot-freshness";
 import { toast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 import { useBot } from "@/store/bot";
 import { usePortfolio } from "@/store/portfolio";
-import { useTerminal } from "@/store/terminal";
+import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
 import { useWallet } from "@/store/wallet";
 import { TokenMark } from "./token-mark";
 
@@ -55,6 +56,7 @@ export function TerminalHeader({
   const botRunning = useBot((s) => s.running);
   const rebalRunning = usePortfolio((s) => s.running);
   const setTab = useTerminal((s) => s.setTab);
+  const syncSec = useTerminal((s) => s.syncSec);
   const aiEnabled = useTerminal((s) => s.aiEnabled);
   const aiControl = useTerminal((s) => s.aiControl);
   const setAiEnabled = useTerminal((s) => s.setAiEnabled);
@@ -67,11 +69,12 @@ export function TerminalHeader({
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
-  const freshAt = snapFreshAtMs(snap);
-  const ageSeconds = now != null && Number.isFinite(freshAt)
-    ? Math.max(0, Math.floor((now - freshAt) / 1_000))
+  const freshnessWindowMs = (clampSyncSec(syncSec ?? DEFAULT_SYNC_SEC) + 15) * 1_000;
+  const freshness = measureSnapshotFreshness(snap, freshnessWindowMs, now ?? Number.NaN);
+  const ageSeconds = freshness.ageMs != null && freshness.ageMs >= 0
+    ? Math.floor(freshness.ageMs / 1_000)
     : null;
-  const marketFresh = snap.source === "live" && ageSeconds != null && ageSeconds <= 75;
+  const marketFresh = freshness.fresh;
   const marketLabel =
     snap.source !== "live"
       ? snap.source === "fallback" ? "Cached" : "Unavailable"
@@ -169,10 +172,10 @@ export function TerminalHeader({
             className="gap-1.5 px-2"
           >
             <Sparkles className="size-3.5" />
-            <span className="hidden sm:inline">AI {aiEnabled ? "ON" : "OFF"}</span>
+            <span className="text-[10px] font-semibold sm:text-xs">AI {aiEnabled ? "ON" : "OFF"}</span>
           </Button>
           <Button
-            variant={aiControl !== "off" ? "secondary" : "outline"}
+            variant={aiControl === "control" ? "danger" : aiControl === "suggest" ? "secondary" : "outline"}
             size="sm"
             aria-pressed={aiControl !== "off"}
             aria-label={aiControl === "off" ? "Turn Jev Plus on in Suggest mode" : "Turn Jev Plus off"}
@@ -181,7 +184,10 @@ export function TerminalHeader({
             className="gap-1.5 px-2"
           >
             <Bot className="size-3.5" />
-            <span className="hidden sm:inline">Jev {aiControl === "off" ? "OFF" : aiControl === "control" ? "CONTROL" : "ON"}</span>
+            <span className="text-[10px] font-semibold sm:text-xs">
+              <span className="sm:hidden">{aiControl === "off" ? "Jev OFF" : aiControl === "control" ? "Jev CTRL" : "Jev ON"}</span>
+              <span className="hidden sm:inline">Jev {aiControl === "off" ? "OFF" : aiControl === "control" ? "CONTROL" : "ON"}</span>
+            </span>
           </Button>
           <Button
             variant="ghost"

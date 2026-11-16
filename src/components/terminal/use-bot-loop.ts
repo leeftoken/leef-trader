@@ -1919,9 +1919,30 @@ async function runBotOnceInner(
       let txid: string | undefined;
       let note = "";
       let outAmt = decision.route.amountOut;
+      let actualInAmt = decision.amountIn;
       let feeInfo: { amount: number; symbol: string } | undefined;
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
+      let pnlSettled = !live;
       const tExec = Date.now();
+      const inMeta = metaOf(decision.tokenIn, book);
+      const outMeta = metaOf(decision.tokenOut, book);
+      const inPriceUsd = usdPriceOf(decision.tokenIn, book) || 0;
+      const outPriceUsd = usdPriceOf(decision.tokenOut, book) || 0;
+      const isVolumeTape =
+        b.strategy === "volume" || /Volume tape|Unleashed tape/i.test(decision.reason);
+      const settleDelayedSwap = (transfers: TxTransfer[]) => {
+        const actualIn = -assetDelta(transfers, w.account, inMeta.symbol, inMeta.contract);
+        const actualOut = assetDelta(transfers, w.account, outMeta.symbol, outMeta.contract);
+        if (!(actualIn > 0) || !(actualOut > 0)) return;
+        const settledInUsd = actualIn * inPriceUsd;
+        const settledOutUsd = actualOut * outPriceUsd;
+        const settledPnl = settledOutUsd - settledInUsd;
+        if (isVolumeTape) {
+          const state = useBot.getState();
+          state.recordVolume(settledInUsd + settledOutUsd, -settledPnl);
+          state.recordResult(settledPnl, equityUsdOf(useWallet.getState().balances(), snap));
+        }
+      };
       if (live) {
         if (!beginSigning()) return decision;
         try {
@@ -1944,32 +1965,41 @@ async function runBotOnceInner(
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
+            const actualIn = -assetDelta(rec.transfers, w.account, inMeta.symbol, inMeta.contract);
+            const actualOut = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
+            if (actualIn > 0 && actualOut > 0) {
+              actualInAmt = actualIn;
+              outAmt = actualOut;
+              pnlSettled = true;
+            }
             markConfirmed();
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
-            if (rec.transfers.length === 0) void reconcileTransfersLater(txid);
+            note = pnlSettled ? " · confirmed on-chain" : " · included; waiting for exact transfer amounts";
+            execStatus = pnlSettled ? "confirmed" : "included";
+            if (!pnlSettled) pollUnknown(txid, settleDelayedSwap);
           } else {
             markUnknown(txid);
             note = " · broadcast, confirmation pending — not retrying";
-            void pollUnknown(txid);
+            pollUnknown(txid, settleDelayedSwap);
           }
         } catch (err) {
           abortSigning();
           throw err;
         }
       } else {
-        const feeSpec = platformFeeOn(outAmt, metaOf(decision.tokenOut, book));
+        const feeSpec = platformFeeOn(outAmt, outMeta);
         if (feeSpec) outAmt -= feeSpec.amount;
         w.applyPaperFill(decision.tokenIn, decision.amountIn, decision.tokenOut, outAmt);
       }
-      const inUsd = decision.amountIn * (usdPriceOf(decision.tokenIn, book) || 0);
-      const outUsd = outAmt * (usdPriceOf(decision.tokenOut, book) || 0);
+      const inUsd = actualInAmt * inPriceUsd;
+      const outUsd = outAmt * outPriceUsd;
       const tapePnl = outUsd - inUsd;
       b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, tapePnl));
       b.clearRejectionStreak();
-      if (b.strategy === "volume" || /Volume tape|Unleashed tape/i.test(decision.reason)) {
+      if (isVolumeTape && pnlSettled) {
         b.recordVolume(inUsd + outUsd, -tapePnl);
         b.recordResult(tapePnl, equityUsd + tapePnl);
+      } else if (isVolumeTape && live) {
+        b.setLastReason("Swap included — realized tape P&L is pending exact on-chain transfer reconciliation");
       }
       b.pushDecision({
         kind: "swap",
@@ -1977,23 +2007,25 @@ async function runBotOnceInner(
         reason: decision.reason + note,
         priceUsd: snap.leefUsd,
         txid,
-        pnlUsd: tapePnl,
+        pnlUsd: pnlSettled ? tapePnl : undefined,
       });
       journal({
         kind: "execution", action: "swap", strategy: b.strategy, mode,
         tokenIn: decision.tokenIn, tokenOut: decision.tokenOut,
-        amountIn: decision.amountIn, expectedOut: decision.route.amountOut,
-        actualOut: outAmt, txid, status: execStatus, pnlUsd: tapePnl,
+        amountIn: pnlSettled ? actualInAmt : decision.amountIn,
+        expectedOut: decision.route.amountOut,
+        actualOut: pnlSettled ? outAmt : undefined,
+        txid, status: execStatus, pnlUsd: pnlSettled ? tapePnl : undefined,
         platformFeeAmount: feeInfo?.amount,
         platformFeeToken: feeInfo?.symbol,
         platformFeeCollected:
           live && execStatus === "confirmed" && feeInfo ? true : undefined,
-        realEdgePct: inUsd > 0 ? (tapePnl / inUsd) * 100 : undefined,
+        realEdgePct: pnlSettled && inUsd > 0 ? (tapePnl / inUsd) * 100 : undefined,
         latencyMs: live ? Date.now() - tExec : undefined,
         ...routeJournalMeta(
           decision.route,
           decision.amountIn,
-          usdPriceOf(decision.tokenIn, book) || 0,
+          inPriceUsd,
         ),
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,

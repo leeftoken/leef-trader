@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ArrowUpRight, Bot, RefreshCw, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { LazyLoginArea } from "@/components/auth/LazyLoginArea";
 import { Badge } from "@/components/ui/badge";
@@ -61,9 +62,14 @@ export function TerminalHeader({
   const setImportOpen = useWallet((s) => s.setImportOpen);
 
   const chgPos = chg != null && chg >= 0;
+  const [now, setNow] = useState(() => snapFreshAtMs(snap));
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const freshAt = snapFreshAtMs(snap);
   const ageSeconds = Number.isFinite(freshAt)
-    ? Math.max(0, Math.floor((Date.now() - freshAt) / 1_000))
+    ? Math.max(0, Math.floor((now - freshAt) / 1_000))
     : null;
   const marketFresh = snap.source === "live" && ageSeconds != null && ageSeconds <= 75;
   const marketLabel =

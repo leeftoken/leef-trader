@@ -146,6 +146,7 @@ function strategyContext(): Record<string, unknown> {
       startedAt: new Date(b.stats.startedAt).toISOString(),
       startEquityUsd: b.stats.startEquityUsd,
       trades: b.stats.trades,
+      completedTrades: b.stats.closedTrades,
       wins: b.stats.wins,
       realizedUsd: Math.round(b.stats.realizedUsd * 1000) / 1000,
       volumeUsd: Math.round(b.stats.volumeUsd),

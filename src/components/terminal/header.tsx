@@ -1,10 +1,11 @@
-import { ArrowUpRight, RefreshCw, ShieldAlert, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowUpRight, Bot, RefreshCw, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { LazyLoginArea } from "@/components/auth/LazyLoginArea";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { marketStats } from "@/lib/leef/analytics";
 import { fmtUsd } from "@/lib/leef/format";
-import type { LeefSnapshot } from "@/lib/leef/types";
+import { snapFreshAtMs, type LeefSnapshot } from "@/lib/leef/types";
 import { toast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 import { useBot } from "@/store/bot";
@@ -54,9 +55,27 @@ export function TerminalHeader({
   const botRunning = useBot((s) => s.running);
   const rebalRunning = usePortfolio((s) => s.running);
   const setTab = useTerminal((s) => s.setTab);
+  const aiEnabled = useTerminal((s) => s.aiEnabled);
+  const aiControl = useTerminal((s) => s.aiControl);
+  const setAiEnabled = useTerminal((s) => s.setAiEnabled);
+  const setAiControl = useTerminal((s) => s.setAiControl);
   const setImportOpen = useWallet((s) => s.setImportOpen);
 
   const chgPos = chg != null && chg >= 0;
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const freshAt = snapFreshAtMs(snap);
+  const ageSeconds = now != null && Number.isFinite(freshAt)
+    ? Math.max(0, Math.floor((now - freshAt) / 1_000))
+    : null;
+  const marketFresh = snap.source === "live" && ageSeconds != null && ageSeconds <= 75;
+  const marketLabel =
+    snap.source !== "live"
+      ? snap.source === "fallback" ? "Cached" : "Unavailable"
+      : marketFresh ? `Live ${ageSeconds}s` : `Stale ${ageSeconds ?? "—"}s`;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-bg/80 backdrop-blur-xl">
@@ -78,16 +97,18 @@ export function TerminalHeader({
             </span>
           </span>
           <Badge
-            variant={snap.source === "live" ? "leef" : "warn"}
-            className="ml-1 hidden md:inline-flex"
+            variant={marketFresh ? "leef" : "warn"}
+            className="ml-1 inline-flex"
+            title={ageSeconds == null ? "Market data freshness unavailable" : `Latest on-chain market observation ${ageSeconds}s ago`}
           >
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                snap.source === "live" ? "animate-pulse bg-leef" : "bg-warn",
+                marketFresh ? "animate-pulse bg-leef" : "bg-warn",
               )}
             />
-            {snap.source === "live" ? "Live" : "Cached"}
+            <span className="hidden sm:inline">{marketLabel}</span>
+            <span className="sm:hidden">{marketFresh ? "Live" : snap.source === "live" ? "Stale" : marketLabel}</span>
           </Badge>
         </button>
 
@@ -138,6 +159,30 @@ export function TerminalHeader({
               <span className="hidden md:inline">Stop all</span>
             </Button>
           )}
+          <Button
+            variant={aiEnabled ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={aiEnabled}
+            aria-label={aiEnabled ? "Turn AI Helper off" : "Turn AI Helper on"}
+            title="AI Helper — evidence review and learning suggestions"
+            onClick={() => setAiEnabled(!aiEnabled)}
+            className="gap-1.5 px-2"
+          >
+            <Sparkles className="size-3.5" />
+            <span className="hidden sm:inline">AI {aiEnabled ? "ON" : "OFF"}</span>
+          </Button>
+          <Button
+            variant={aiControl !== "off" ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={aiControl !== "off"}
+            aria-label={aiControl === "off" ? "Turn Jev Plus on in Suggest mode" : "Turn Jev Plus off"}
+            title={aiControl === "control" ? "Jev Plus CONTROL — click to turn off" : "Jev Plus — toggle advisory mode"}
+            onClick={() => setAiControl(aiControl === "off" ? "suggest" : "off")}
+            className="gap-1.5 px-2"
+          >
+            <Bot className="size-3.5" />
+            <span className="hidden sm:inline">Jev {aiControl === "off" ? "OFF" : aiControl === "control" ? "CONTROL" : "ON"}</span>
+          </Button>
           <Button
             variant="ghost"
             size="icon"

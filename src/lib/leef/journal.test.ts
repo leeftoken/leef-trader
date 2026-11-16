@@ -63,6 +63,7 @@ describe("aggregateEntries", () => {
     expect(auto.gatePass).toBe(1);
     expect(auto.gateFail).toBe(2);
     expect(auto.executions).toBe(2);
+    expect(auto.closedTrades).toBe(1);
     expect(auto.paper).toBe(1);
     expect(auto.confirmed).toBe(1);
     expect(auto.wins).toBe(1);
@@ -78,6 +79,19 @@ describe("aggregateEntries", () => {
     expect(s.topGateFails).toHaveLength(1);
     expect(s.topGateFails[0]!.count).toBe(2);
     expect(s.topGateFails[0]!.reason).toContain("#");
+  });
+
+  it("does not count included or unknown estimated outcomes as settled P&L", () => {
+    const s = aggregateEntries([
+      e({ kind: "execution", action: "sell", strategy: "auto", status: "included", pnlUsd: 99 }),
+      e({ kind: "execution", action: "arb", strategy: "auto", status: "unknown", pnlUsd: 50 }),
+      e({ kind: "execution", action: "sell", strategy: "auto", status: "confirmed", pnlUsd: -2 }),
+    ]);
+    const auto = s.byStrategy.find((x) => x.strategy === "auto")!;
+    expect(auto.executions).toBe(3);
+    expect(auto.closedTrades).toBe(1);
+    expect(auto.wins).toBe(0);
+    expect(auto.pnlUsd).toBe(-2);
   });
 
   it("buckets entries without a strategy under a placeholder", () => {

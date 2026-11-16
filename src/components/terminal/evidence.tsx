@@ -283,7 +283,7 @@ export function Evidence() {
                   const predAvg = s.predN > 0 ? s.predEdgePctSum / s.predN : null;
                   const realAvg = s.realN > 0 ? s.realEdgePctSum / s.realN : null;
                   const calibErr = predAvg != null && realAvg != null ? predAvg - realAvg : null;
-                  const winRate = s.executions > 0 ? (s.wins / s.executions) * 100 : null;
+                  const winRate = s.closedTrades > 0 ? (s.wins / s.closedTrades) * 100 : null;
                   return (
                     <TableRow key={s.strategy}>
                       <TableCell className="font-medium">
@@ -298,6 +298,7 @@ export function Evidence() {
                       <TableCell className="text-right tabular-nums text-muted-foreground">{fmtNum(s.holds, { digits: 0 })}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {fmtNum(s.executions, { digits: 0 })}
+                        <span className="text-muted-foreground"> ({fmtNum(s.closedTrades, { digits: 0 })} closed)</span>
                         {s.paper > 0 && (
                           <span className="text-muted-foreground"> ({fmtNum(s.paper, { digits: 0 })}p)</span>
                         )}

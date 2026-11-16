@@ -192,11 +192,29 @@ export async function waitForTransaction(
  */
 export async function reconcileTransfersLater(
   txid: string,
-  opts?: { attempts?: number; delayMs?: number },
+  opts?: { attempts?: number; delayMs?: number; budgetMs?: number },
 ): Promise<ReconcileResult> {
+  const attempts = Math.max(1, opts?.attempts ?? 8);
+  const delayMs = Math.max(100, opts?.delayMs ?? 800);
+  const budgetMs = Math.max(delayMs, opts?.budgetMs ?? 12_000);
+  const startedAt = Date.now();
+
+  // The fast inclusion path can confirm a block before Hyperion has indexed
+  // the transfer actions. Poll history itself here; calling
+  // waitForTransaction once would return confirmed with [] immediately
+  // after RPC inclusion and would never actually reconcile the fill.
+  for (let i = 0; i < attempts && Date.now() - startedAt < budgetMs; i += 1) {
+    if (i > 0) await sleep(delayMs);
+    const history = await hyperionOnce(txid);
+    if (history?.status === "failed") return history;
+    if (history?.status === "confirmed" && history.transfers.length > 0) return history;
+  }
+
+  // Preserve the authoritative transaction verdict, but an empty transfer
+  // list is deliberately not treated as a settled P&L observation.
   return await waitForTransaction(txid, {
-    attempts: opts?.attempts ?? 8,
-    delayMs: opts?.delayMs ?? 800,
-    budgetMs: 12_000,
+    attempts: 1,
+    delayMs,
+    budgetMs: Math.max(1_200, budgetMs),
   });
 }

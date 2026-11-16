@@ -51,7 +51,10 @@ export type StrategyPerf = {
 };
 
 export type BotStats = {
+  /** Executed transaction count (entry + exit legs are separate executions). */
   trades: number;
+  /** Completed, settled trade outcomes. This is the win-rate denominator. */
+  closedTrades: number;
   wins: number;
   realizedUsd: number;
   /** Volume maker: gross USD notional cycled through the books. */
@@ -167,6 +170,7 @@ type BotState = {
 
 const freshStats = (equityUsd: number): BotStats => ({
   trades: 0,
+  closedTrades: 0,
   wins: 0,
   realizedUsd: 0,
   volumeUsd: 0,
@@ -303,6 +307,7 @@ export const useBot = create<BotState>()(
           stats: {
             ...s.stats,
             realizedUsd: s.stats.realizedUsd + pnlUsd,
+            closedTrades: s.stats.closedTrades + 1,
             wins: s.stats.wins + (pnlUsd > 0 ? 1 : 0),
             lastPnlUsd: pnlUsd,
             equity: [...s.stats.equity, { t: Date.now(), usd: equityUsd }].slice(-120),
@@ -406,10 +411,11 @@ export const useBot = create<BotState>()(
       // v11: stats.byStrategyPaper — paper/live calibration split. The merge
       // below ({ ...freshStats(0), ...p.stats }) fills it for old saves.
       // v12: strategyHalt — persisted retry-storm halt flag (null for old saves).
-      // v13: safer risk defaults — breakers on (maxDrawdownPct 0 → 10, new
-      // maxDailyLossPct 3), pacing at the OLD defaults (120/h, 15 s) moves to
-      // 20/h, 30 s, new maxPoolSharePct 5. A user can set 0 again afterwards.
-      version: 13,
+      // v13: safer risk defaults.
+      // v14: separate executed transaction count from completed trade outcomes.
+      // Historical wins had no reliable closed-trade denominator, so old win
+      // counts are reset rather than displaying a fabricated win rate.
+      version: 14,
       migrate: (persisted, version) => {
         const p = (
           persisted && typeof persisted === "object" ? persisted : {}
@@ -463,7 +469,15 @@ export const useBot = create<BotState>()(
           gridAnchor: p.gridAnchor ?? null,
           stats:
             p.stats && typeof p.stats === "object"
-              ? { ...freshStats(0), ...p.stats }
+              ? {
+                  ...freshStats(0),
+                  ...p.stats,
+                  closedTrades:
+                    version >= 14 && Number.isFinite((p.stats as BotStats).closedTrades)
+                      ? Math.max(0, (p.stats as BotStats).closedTrades)
+                      : 0,
+                  wins: version >= 14 ? Math.max(0, Number((p.stats as BotStats).wins) || 0) : 0,
+                }
               : freshStats(0),
           series: Array.isArray(p.series) ? p.series : [],
           decisions: Array.isArray(p.decisions) ? p.decisions : [],

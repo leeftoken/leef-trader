@@ -205,6 +205,8 @@ export type StrategyEvidence = {
   confirmed: number;
   unknown: number;
   paper: number;
+  /** Settled outcome-bearing trades; excludes entry legs and unresolved txs. */
+  closedTrades: number;
   wins: number;
   pnlUsd: number;
   predEdgePctSum: number;
@@ -263,6 +265,7 @@ function blankStrategyEvidence(strategy: string): StrategyEvidence {
     confirmed: 0,
     unknown: 0,
     paper: 0,
+    closedTrades: 0,
     wins: 0,
     pnlUsd: 0,
     predEdgePctSum: 0,
@@ -332,16 +335,25 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
           venueImpact.sumAbsPct += Math.abs(e.venueImpactPct);
         }
         break;
-      case "execution":
+      case "execution": {
         // Self-impact follow-up entries are observations, not new executions.
         if (e.amountIn == null && e.expectedOut == null && e.selfImpactPct != null) break;
         s.executions += 1;
         if (e.status === "confirmed" || e.status === "included") s.confirmed += 1;
         if (e.status === "unknown") s.unknown += 1;
         if (e.status === "paper") s.paper += 1;
-        if ((e.pnlUsd ?? 0) > 0) s.wins += 1;
-        s.pnlUsd += e.pnlUsd ?? 0;
+        const hasSettledOutcome =
+          e.pnlUsd != null &&
+          Number.isFinite(e.pnlUsd) &&
+          (e.status === "confirmed" || e.status === "paper") &&
+          (e.action === "sell" || e.action === "arb" || e.action === "swap");
+        if (hasSettledOutcome) {
+          s.closedTrades += 1;
+          if (e.pnlUsd! > 0) s.wins += 1;
+        }
+        if (hasSettledOutcome) s.pnlUsd += e.pnlUsd!;
         break;
+      }
       case "calibration":
         if (e.predEdgePct != null) {
           s.predEdgePctSum += e.predEdgePct;

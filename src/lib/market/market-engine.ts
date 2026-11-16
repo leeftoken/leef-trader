@@ -21,7 +21,8 @@
  */
 import { attachUsdPrices } from "@/lib/leef/parse";
 import { getLeefSnapshot } from "@/lib/leef/snapshot";
-import { snapFreshAtMs, type AuxPool, type LeefPool, type LeefSnapshot } from "@/lib/leef/types";
+import { type AuxPool, type LeefPool, type LeefSnapshot } from "@/lib/leef/types";
+import { measureSnapshotFreshness } from "./snapshot-freshness";
 import {
   applyOnchainToAuxPool,
   applyOnchainToLeefPool,
@@ -344,9 +345,8 @@ class MarketEngine {
         // window allows (e.g. right after a long suspension).
         // F0: freshness = max(fetchedAt, spotAt) — a pool hot-patched from
         // chain 2 s ago is fresh even if the last full API pull is not.
-        const ageMs = Date.now() - (snapFreshAtMs(snap) || Date.now());
-        const maxAgeMs = this.cadenceMs() + 15_000;
-        if (snap.source === "live" && ageMs <= maxAgeMs) {
+        const freshness = measureSnapshotFreshness(snap, this.cadenceMs() + 15_000);
+        if (snap.source === "live" && freshness.fresh) {
           // Balances refresh without blocking the strategy cycle (the bot
           // sizes from the wallet store, which lands a moment later).
           const tB = Date.now();
@@ -365,12 +365,14 @@ class MarketEngine {
             signer: this.signerView(),
             autoTrade: this.autoTradeView(),
           });
-        } else if (snap.source === "live" && ageMs > maxAgeMs && useBot.getState().running) {
+        } else if (snap.source === "live" && !freshness.fresh && useBot.getState().running) {
+          const ageLabel =
+            freshness.ageMs == null || freshness.ageMs < 0
+              ? "unknown age"
+              : `${(freshness.ageMs / 1000).toFixed(0)}s old`;
           useBot
             .getState()
-            .setLastReason(
-              `Market book is ${(ageMs / 1000).toFixed(0)}s old — not trading from stale data`,
-            );
+            .setLastReason(`Market book is ${ageLabel} — not trading from stale data`);
         }
         // Fresh snapshot → re-run the spot patcher against the new pools.
         void this.onchainSpot();
@@ -447,8 +449,8 @@ class MarketEngine {
         marketBus.emit("snapshot", { snap: patchedSnap });
         // Strategies reevaluate on chain-truth changes too (staleness gated).
         // F0: the just-applied spot patch counts toward freshness.
-        const ageMs = Date.now() - (snapFreshAtMs(patchedSnap) || Date.now());
-        if (ageMs <= this.cadenceMs() + 15_000) {
+        const freshness = measureSnapshotFreshness(patchedSnap, this.cadenceMs() + 15_000);
+        if (freshness.fresh) {
           // Same single lane for chain-spot updates: settle profit selection
           // before maintenance is allowed to inspect/spend inventory.
           void botOnSnapshot(patchedSnap).then(() => rebalancerOnSnapshot(patchedSnap));

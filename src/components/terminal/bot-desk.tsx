@@ -60,6 +60,8 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal } from "@/lib/leef/journal";
+import { liveCapitalBlocked, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 
 const KIND_VARIANT: Record<
   BotDecisionLog["kind"],
@@ -94,6 +96,21 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const [confirmLive, setConfirmLive] = useState(false);
   const [confirmForce, setConfirmForce] = useState<"buy" | "sell" | null>(null);
   const [busyForce, setBusyForce] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryResult, setRecoveryResult] = useState<ReconcileResult | null>(null);
+  const unresolvedTxid = pendingTxid();
+  const unresolvedPhase = tradePhase();
+  const hasRecoveryLock = liveCapitalBlocked();
+
+  async function inspectPendingSettlement() {
+    if (!unresolvedTxid || recoveryBusy) return;
+    setRecoveryBusy(true);
+    try {
+      setRecoveryResult(await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 }));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
 
   const liveReady = mode === "live" && (hasSecret() || hasWalletSession());
   const liveBook = snap.source === "live";
@@ -193,6 +210,46 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           </Badge>
         </div>
       </div>
+
+      {hasRecoveryLock && (
+        <Card className="border-amber-500/40 bg-amber-500/5 p-3 sm:p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">Live trade recovery · capital locked</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {unresolvedTxid
+                  ? `Transaction ${unresolvedTxid.slice(0, 12)}… is ${unresolvedPhase}. Inspect chain settlement before resuming.`
+                  : "A signing attempt was interrupted before a transaction ID was saved. Check wallet activity before trading again."}
+              </p>
+            </div>
+            {unresolvedTxid && (
+              <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
+                {recoveryBusy ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <ScanSearch className="mr-2 size-3.5" />}
+                Inspect settlement
+              </Button>
+            )}
+          </div>
+          {recoveryResult && (
+            <div className="mt-3 rounded-md border border-border/60 bg-background/70 p-3">
+              <div className="text-xs font-medium">
+                {recoveryResult.status === "confirmed" ? "Transfer evidence found — position still requires reconciliation" : recoveryResult.status === "failed" ? "Chain reports transaction failure" : "Still unresolved — capital remains locked"}
+              </div>
+              {recoveryResult.status === "confirmed" && (
+                <div className="mt-2 space-y-1">
+                  {recoveryResult.transfers.map((transfer, index) => (
+                    <div key={`${transfer.contract}-${index}`} className="flex flex-wrap justify-between gap-x-3 text-[11px] text-muted-foreground">
+                      <span>{transfer.from} → {transfer.to} · {transfer.contract}</span>
+                      <span className="font-mono">{transfer.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {recoveryResult.status === "failed" && <p className="mt-1 text-[11px] text-muted-foreground">{recoveryResult.error}</p>}
+              <p className="mt-2 text-[11px] text-muted-foreground">This inspector is read-only. It never retries a transaction or releases the capital lock automatically.</p>
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card className="p-3 sm:p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">

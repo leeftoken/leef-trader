@@ -1779,13 +1779,6 @@ async function runBotOnceInner(
           realEdgePct: position.entryCostUsd > 0 ? (settledPnl / position.entryCostUsd) * 100 : 0,
           latencyMs: Date.now() - t0,
         }, mode);
-        journal({
-          kind: "calibration",
-          strategy: position.strategy ?? b.strategy,
-          pnlUsd: settledPnl,
-          realEdgePct: position.entryCostUsd > 0 ? (settledPnl / position.entryCostUsd) * 100 : 0,
-          reason: "Delayed sell transfer reconciliation",
-        });
       };
       if (live) {
         if (!beginSigning()) return decision;

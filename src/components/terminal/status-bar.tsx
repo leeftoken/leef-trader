@@ -68,7 +68,7 @@ export function StatusBar({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span
             className={cn("font-semibold tracking-wide", marketDataTone)}
-            title={`Market source: ${snap.source}; freshest snapshot age: ${Number.isFinite(snapshotAgeSec) ? snapshotAgeSec.toFixed(1) + "s" : "unknown"}; bot quote freshness limit: 45s`}
+            title={`Market source: ${snap.source}; freshest snapshot age: ${Number.isFinite(snapshotAgeSec) ? snapshotAgeSec.toFixed(1) + "s" : "unknown"}; trading freshness window: ${Math.round(freshnessWindowMs / 1_000)}s`}
           >
             {marketDataState}
             {Number.isFinite(snapshotAgeSec) && <span className="ml-1 font-normal text-muted-foreground">{snapshotAgeSec.toFixed(0)}s</span>}

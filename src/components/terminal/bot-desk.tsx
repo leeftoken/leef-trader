@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
   BOT_WARMUP_POINTS,
+  DEFAULT_GOALS,
   DEFAULT_RISK,
   evaluateBot,
   STRATEGIES,
@@ -200,6 +201,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
               b.setRisk({
+                ...DEFAULT_RISK,
                 maxImpactPct: 1,
                 cooldownSec: 60,
                 maxTradesHour: 6,
@@ -211,10 +213,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 maxHops: 2,
                 maxPoolSharePct: 2,
               });
-              b.setGoals({ maxDrawdownPct: 8, maxDailyLossPct: 2, maxSessionLossUsd: 0 });
+              b.setGoals({ ...DEFAULT_GOALS, maxDrawdownPct: 8, maxDailyLossPct: 2 });
             }}>Conservative</Button>
             <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
               b.setRisk({
+                ...DEFAULT_RISK,
                 maxImpactPct: 2,
                 cooldownSec: 45,
                 maxTradesHour: 10,
@@ -226,22 +229,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 maxHops: 3,
                 maxPoolSharePct: 3,
               });
-              b.setGoals({ maxDrawdownPct: 10, maxDailyLossPct: 3, maxSessionLossUsd: 0 });
+              b.setGoals(DEFAULT_GOALS);
             }}>Balanced</Button>
             <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
-              b.setRisk({
-                maxImpactPct: DEFAULT_RISK.maxImpactPct,
-                cooldownSec: DEFAULT_RISK.cooldownSec,
-                maxTradesHour: DEFAULT_RISK.maxTradesHour,
-                slippage: DEFAULT_RISK.slippage,
-                minConfidence: DEFAULT_RISK.minConfidence,
-                minEdgePct: DEFAULT_RISK.minEdgePct,
-                maxEchoLossPct: DEFAULT_RISK.maxEchoLossPct,
-                maxQuoteAgeSec: DEFAULT_RISK.maxQuoteAgeSec,
-                maxHops: DEFAULT_RISK.maxHops,
-                maxPoolSharePct: DEFAULT_RISK.maxPoolSharePct,
-              });
-              b.setGoals({ maxDrawdownPct: 10, maxDailyLossPct: 3, maxSessionLossUsd: 0 });
+              b.setRisk(DEFAULT_RISK);
+              b.setGoals(DEFAULT_GOALS);
             }}>Standard</Button>
           </div>
         </div>

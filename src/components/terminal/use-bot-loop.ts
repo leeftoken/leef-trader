@@ -63,7 +63,7 @@ import { snapFreshAtMs, type LeefSnapshot, type SwapRoute } from "@/lib/leef/typ
 import { parseAssetAmount, type AlcorRouteQuote } from "@/lib/wallet/alcor-route";
 import { waxResourceBlock } from "@/lib/wallet/chain";
 import { arbFloorViolation, memoMinOutSum } from "@/lib/wallet/policy";
-import { assetDelta, reconcileTransfersLater, waitForTransaction } from "@/lib/wallet/reconcile";
+import { assetDelta, reconcileTransfersLater, waitForTransaction, type TxTransfer } from "@/lib/wallet/reconcile";
 import { signAndPushArb, signAndPushSwap } from "@/lib/wallet/sign";
 import {
   abortSigning,
@@ -489,11 +489,19 @@ let rateLimitedUntil = 0;
 let cycleInFlight = false;
 
 /** Keep polling an UNKNOWN txid. Never submits another trade. Unlocks only on fail/confirm. */
-function pollUnknown(txid: string): void {
+function pollUnknown(
+  txid: string,
+  onConfirmedTransfers?: (transfers: TxTransfer[]) => void,
+): void {
   void (async () => {
     const rec = await reconcileTransfersLater(txid);
     if (rec.status === "failed") markFailed();
-    else if (rec.status === "confirmed") markConfirmed();
+    else if (rec.status === "confirmed") {
+      markConfirmed();
+      // Inclusion can arrive before Hyperion has indexed token transfers.
+      // Never promote a router estimate into realized P&L.
+      if (rec.transfers.length > 0) onConfirmedTransfers?.(rec.transfers);
+    }
     // still unknown → stay locked
   })();
 }

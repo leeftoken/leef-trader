@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
   BOT_WARMUP_POINTS,
+  DEFAULT_RISK,
   evaluateBot,
   STRATEGIES,
   type BotStrategy,
@@ -101,6 +102,8 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const winRate = b.stats.closedTrades > 0 ? b.stats.wins / b.stats.closedTrades : null;
 
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
+  const flowGuardEnabled = useTerminal((s) => s.flowGuardEnabled);
+  const setFlowGuardEnabled = useTerminal((s) => s.setFlowGuardEnabled);
   /**
    * Dry-run: what the bot would do on this book. Evaluated at the book's own
    * fetch time (pure — no Date.now() in render) and memoized on the inputs so
@@ -185,6 +188,74 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           </Badge>
         </div>
       </div>
+
+      <Card className="p-3 sm:p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-medium">Quick setup</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Apply a sensible risk profile. You can still fine-tune every setting below.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
+              b.setRisk({
+                maxImpactPct: 1,
+                cooldownSec: 60,
+                maxTradesHour: 6,
+                slippage: 0.4,
+                minConfidence: 75,
+                minEdgePct: 0.75,
+                maxEchoLossPct: 0.75,
+                maxQuoteAgeSec: 30,
+                maxHops: 2,
+                maxPoolSharePct: 2,
+              });
+              b.setGoals({ maxDrawdownPct: 8, maxDailyLossPct: 2, maxSessionLossUsd: 0 });
+            }}>Conservative</Button>
+            <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
+              b.setRisk({
+                maxImpactPct: 2,
+                cooldownSec: 45,
+                maxTradesHour: 10,
+                slippage: 0.5,
+                minConfidence: 70,
+                minEdgePct: 0.6,
+                maxEchoLossPct: 1,
+                maxQuoteAgeSec: 35,
+                maxHops: 3,
+                maxPoolSharePct: 3,
+              });
+              b.setGoals({ maxDrawdownPct: 10, maxDailyLossPct: 3, maxSessionLossUsd: 0 });
+            }}>Balanced</Button>
+            <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
+              b.setRisk({
+                maxImpactPct: DEFAULT_RISK.maxImpactPct,
+                cooldownSec: DEFAULT_RISK.cooldownSec,
+                maxTradesHour: DEFAULT_RISK.maxTradesHour,
+                slippage: DEFAULT_RISK.slippage,
+                minConfidence: DEFAULT_RISK.minConfidence,
+                minEdgePct: DEFAULT_RISK.minEdgePct,
+                maxEchoLossPct: DEFAULT_RISK.maxEchoLossPct,
+                maxQuoteAgeSec: DEFAULT_RISK.maxQuoteAgeSec,
+                maxHops: DEFAULT_RISK.maxHops,
+                maxPoolSharePct: DEFAULT_RISK.maxPoolSharePct,
+              });
+              b.setGoals({ maxDrawdownPct: 10, maxDailyLossPct: 3, maxSessionLossUsd: 0 });
+            }}>Standard</Button>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+          <span className="mr-1 text-xs text-muted-foreground">Protection switches</span>
+          <Button type="button" size="sm" variant={flowGuardEnabled ? "secondary" : "outline"} aria-pressed={flowGuardEnabled} onClick={() => setFlowGuardEnabled(!flowGuardEnabled)}>
+            Swap-flow guard {flowGuardEnabled ? "ON" : "OFF"}
+          </Button>
+          <Button type="button" size="sm" variant={b.neftyVenue ? "secondary" : "outline"} aria-pressed={b.neftyVenue} onClick={() => b.setNeftyVenue(!b.neftyVenue)}>
+            Nefty route {b.neftyVenue ? "ON" : "OFF"}
+          </Button>
+          <span className="text-[11px] text-subtle">Risk settings are locked while the bot is running.</span>
+        </div>
+      </Card>
 
       {b.strategyHalt && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sell/40 bg-sell/10 px-3 py-2 text-xs text-sell">

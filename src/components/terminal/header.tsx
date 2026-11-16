@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { marketStats } from "@/lib/leef/analytics";
 import { fmtUsd } from "@/lib/leef/format";
-import type { LeefSnapshot } from "@/lib/leef/types";
+import { snapFreshAtMs, type LeefSnapshot } from "@/lib/leef/types";
 import { toast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 import { useBot } from "@/store/bot";
@@ -61,6 +61,15 @@ export function TerminalHeader({
   const setImportOpen = useWallet((s) => s.setImportOpen);
 
   const chgPos = chg != null && chg >= 0;
+  const freshAt = snapFreshAtMs(snap);
+  const ageSeconds = Number.isFinite(freshAt)
+    ? Math.max(0, Math.floor((Date.now() - freshAt) / 1_000))
+    : null;
+  const marketFresh = snap.source === "live" && ageSeconds != null && ageSeconds <= 75;
+  const marketLabel =
+    snap.source !== "live"
+      ? snap.source === "fallback" ? "Cached" : "Unavailable"
+      : marketFresh ? `Live ${ageSeconds}s` : `Stale ${ageSeconds ?? "—"}s`;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-bg/80 backdrop-blur-xl">
@@ -82,16 +91,18 @@ export function TerminalHeader({
             </span>
           </span>
           <Badge
-            variant={snap.source === "live" ? "leef" : "warn"}
-            className="ml-1 hidden md:inline-flex"
+            variant={marketFresh ? "leef" : "warn"}
+            className="ml-1 inline-flex"
+            title={ageSeconds == null ? "Market data freshness unavailable" : `Latest on-chain market observation ${ageSeconds}s ago`}
           >
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                snap.source === "live" ? "animate-pulse bg-leef" : "bg-warn",
+                marketFresh ? "animate-pulse bg-leef" : "bg-warn",
               )}
             />
-            {snap.source === "live" ? "Live" : "Cached"}
+            <span className="hidden sm:inline">{marketLabel}</span>
+            <span className="sm:hidden">{marketFresh ? "Live" : snap.source === "live" ? "Stale" : marketLabel}</span>
           </Badge>
         </button>
 

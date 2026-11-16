@@ -62,13 +62,13 @@ export function TerminalHeader({
   const setImportOpen = useWallet((s) => s.setImportOpen);
 
   const chgPos = chg != null && chg >= 0;
-  const [now, setNow] = useState(() => snapFreshAtMs(snap));
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
   const freshAt = snapFreshAtMs(snap);
-  const ageSeconds = Number.isFinite(freshAt)
+  const ageSeconds = now != null && Number.isFinite(freshAt)
     ? Math.max(0, Math.floor((now - freshAt) / 1_000))
     : null;
   const marketFresh = snap.source === "live" && ageSeconds != null && ageSeconds <= 75;

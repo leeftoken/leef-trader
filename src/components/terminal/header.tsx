@@ -1,4 +1,4 @@
-import { ArrowUpRight, RefreshCw, ShieldAlert, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { ArrowUpRight, Bot, RefreshCw, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { LazyLoginArea } from "@/components/auth/LazyLoginArea";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,10 @@ export function TerminalHeader({
   const botRunning = useBot((s) => s.running);
   const rebalRunning = usePortfolio((s) => s.running);
   const setTab = useTerminal((s) => s.setTab);
+  const aiEnabled = useTerminal((s) => s.aiEnabled);
+  const aiControl = useTerminal((s) => s.aiControl);
+  const setAiEnabled = useTerminal((s) => s.setAiEnabled);
+  const setAiControl = useTerminal((s) => s.setAiControl);
   const setImportOpen = useWallet((s) => s.setImportOpen);
 
   const chgPos = chg != null && chg >= 0;
@@ -138,6 +142,30 @@ export function TerminalHeader({
               <span className="hidden md:inline">Stop all</span>
             </Button>
           )}
+          <Button
+            variant={aiEnabled ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={aiEnabled}
+            aria-label={aiEnabled ? "Turn AI Helper off" : "Turn AI Helper on"}
+            title="AI Helper — evidence review and learning suggestions"
+            onClick={() => setAiEnabled(!aiEnabled)}
+            className="gap-1.5 px-2"
+          >
+            <Sparkles className="size-3.5" />
+            <span className="hidden sm:inline">AI {aiEnabled ? "ON" : "OFF"}</span>
+          </Button>
+          <Button
+            variant={aiControl !== "off" ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={aiControl !== "off"}
+            aria-label={aiControl === "off" ? "Turn Jev Plus on in Suggest mode" : "Turn Jev Plus off"}
+            title={aiControl === "control" ? "Jev Plus CONTROL — click to turn off" : "Jev Plus — toggle advisory mode"}
+            onClick={() => setAiControl(aiControl === "off" ? "suggest" : "off")}
+            className="gap-1.5 px-2"
+          >
+            <Bot className="size-3.5" />
+            <span className="hidden sm:inline">Jev {aiControl === "off" ? "OFF" : aiControl === "control" ? "CONTROL" : "ON"}</span>
+          </Button>
           <Button
             variant="ghost"
             size="icon"

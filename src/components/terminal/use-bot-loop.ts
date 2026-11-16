@@ -2323,7 +2323,7 @@ export async function botOnSnapshot(snap: LeefSnapshot): Promise<void> {
       void maybeAutoReview({
         aiEnabled: t.aiEnabled,
         running: b.running,
-        trades: b.stats.trades,
+        trades: b.stats.closedTrades,
         everyTrades: t.aiReviewEveryTrades,
         gatewayUrl: t.aiGatewayUrl,
       });

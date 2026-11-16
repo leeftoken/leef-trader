@@ -63,6 +63,7 @@ describe("aggregateEntries", () => {
     expect(auto.gatePass).toBe(1);
     expect(auto.gateFail).toBe(2);
     expect(auto.executions).toBe(2);
+    expect(auto.closedTrades).toBe(1);
     expect(auto.paper).toBe(1);
     expect(auto.confirmed).toBe(1);
     expect(auto.wins).toBe(1);

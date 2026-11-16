@@ -335,7 +335,7 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
           venueImpact.sumAbsPct += Math.abs(e.venueImpactPct);
         }
         break;
-      case "execution":
+      case "execution": {
         // Self-impact follow-up entries are observations, not new executions.
         if (e.amountIn == null && e.expectedOut == null && e.selfImpactPct != null) break;
         s.executions += 1;
@@ -352,6 +352,7 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
         }
         s.pnlUsd += e.pnlUsd ?? 0;
         break;
+      }
       case "calibration":
         if (e.predEdgePct != null) {
           s.predEdgePctSum += e.predEdgePct;

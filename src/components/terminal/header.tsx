@@ -172,10 +172,10 @@ export function TerminalHeader({
             className="gap-1.5 px-2"
           >
             <Sparkles className="size-3.5" />
-            <span className="hidden sm:inline">AI {aiEnabled ? "ON" : "OFF"}</span>
+            <span className="text-[10px] font-semibold sm:text-xs">AI {aiEnabled ? "ON" : "OFF"}</span>
           </Button>
           <Button
-            variant={aiControl !== "off" ? "secondary" : "outline"}
+            variant={aiControl === "control" ? "danger" : aiControl === "suggest" ? "secondary" : "outline"}
             size="sm"
             aria-pressed={aiControl !== "off"}
             aria-label={aiControl === "off" ? "Turn Jev Plus on in Suggest mode" : "Turn Jev Plus off"}
@@ -184,7 +184,10 @@ export function TerminalHeader({
             className="gap-1.5 px-2"
           >
             <Bot className="size-3.5" />
-            <span className="hidden sm:inline">Jev {aiControl === "off" ? "OFF" : aiControl === "control" ? "CONTROL" : "ON"}</span>
+            <span className="text-[10px] font-semibold sm:text-xs">
+              <span className="sm:hidden">{aiControl === "off" ? "Jev OFF" : aiControl === "control" ? "Jev CTRL" : "Jev ON"}</span>
+              <span className="hidden sm:inline">Jev {aiControl === "off" ? "OFF" : aiControl === "control" ? "CONTROL" : "ON"}</span>
+            </span>
           </Button>
           <Button
             variant="ghost"

@@ -2100,7 +2100,25 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       /** Net quote-token delta read from the confirmed transaction (null = estimate). */
       let realizedQuote: number | null = null;
+      let pnlSettled = !live;
       const t0 = Date.now();
+      const settleDelayedArb = (transfers: TxTransfer[]) => {
+        const hasQuoteTransfer = transfers.some(
+          (t) => t.symbol === qSym && t.contract === qContract && (t.from === w.account || t.to === w.account),
+        );
+        if (!hasQuoteTransfer) return;
+        const actual = assetDelta(transfers, w.account, qSym, qContract);
+        const settledPnl = actual * quoteMarkUsd;
+        const state = useBot.getState();
+        state.recordResult(settledPnl, equityUsdOf(useWallet.getState().balances(), snap));
+        state.recordStrategyPerf(b.strategy, {
+          pnlUsd: settledPnl,
+          predEdgePct: plan.profitPct * 100,
+          realEdgePct: plan.quoteIn > 0 ? (actual / plan.quoteIn) * 100 : 0,
+          latencyMs: Date.now() - t0,
+        }, mode);
+        if (isEcho) state.recordVolume((plan.quoteIn + plan.quoteOut) * quoteMarkUsd, -settledPnl);
+      };
       if (live) {
         if (!beginSigning()) return decision;
         const tSign = Date.now();
@@ -2125,15 +2143,21 @@ async function runBotOnceInner(
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
-            realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
-            note = rec.transfers.length ? " · confirmed on-chain" : " · included (transfers pending)";
-            execStatus = rec.transfers.length ? "confirmed" : "included";
+            const hasQuoteTransfer = rec.transfers.some(
+              (t) => t.symbol === qSym && t.contract === qContract && (t.from === w.account || t.to === w.account),
+            );
+            if (hasQuoteTransfer) {
+              realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
+              pnlSettled = true;
+            }
+            note = pnlSettled ? " · confirmed on-chain" : " · included; waiting for exact transfer amounts";
+            execStatus = pnlSettled ? "confirmed" : "included";
             markConfirmed();
-            if (rec.transfers.length === 0) void reconcileTransfersLater(txid);
+            if (!pnlSettled) pollUnknown(txid, settleDelayedArb);
           } else {
             markUnknown(txid);
             note = " · broadcast, confirmation pending — not retrying";
-            void pollUnknown(txid);
+            pollUnknown(txid, settleDelayedArb);
           }
         } catch (err) {
           abortSigning();
@@ -2149,36 +2173,42 @@ async function runBotOnceInner(
           ? realizedQuote * quoteMarkUsd
           : (plan.quoteOut - plan.quoteIn) * quoteMarkUsd;
       b.markTrade(adaptiveCooldownSec(b.risk.cooldownSec, b.strategy, pnlUsd));
-      b.recordResult(pnlUsd, equityUsd + pnlUsd);
+      if (pnlSettled) {
+        b.recordResult(pnlUsd, equityUsd + pnlUsd);
+        // Calibration uses the confirmed quote-token delta in live mode.
+        b.recordStrategyPerf(b.strategy, {
+          pnlUsd,
+          predEdgePct: plan.profitPct * 100,
+          realEdgePct:
+            realizedQuote != null
+              ? (realizedQuote / plan.quoteIn) * 100
+              : (plan.quoteOut / plan.quoteIn - 1) * 100,
+          latencyMs: live ? Date.now() - t0 : null,
+        }, mode);
+        if (isEcho) b.recordVolume((plan.quoteIn + plan.quoteOut) * quoteMarkUsd, -pnlUsd);
+      } else {
+        b.setLastReason("Arbitrage included — realized P&L is pending exact on-chain transfer reconciliation");
+      }
       // A successful execution breaks the consecutive-rejection run.
       b.clearRejectionStreak();
-      // Calibration: the router-quoted edge vs what the chain actually paid.
-      b.recordStrategyPerf(b.strategy, {
-        pnlUsd,
-        predEdgePct: plan.profitPct * 100,
-        realEdgePct:
-          (realizedQuote != null ? realizedQuote / plan.quoteIn : plan.quoteOut / plan.quoteIn - 1) * 100,
-        latencyMs: live ? Date.now() - t0 : null,
-      }, mode);
-      if (isEcho) {
-        b.recordVolume((plan.quoteIn + plan.quoteOut) * quoteMarkUsd, -pnlUsd);
-      }
       b.pushDecision({
         kind: "arb",
         mode,
         reason: decision.reason + note,
         priceUsd: snap.leefUsd,
         txid,
-        pnlUsd,
+        pnlUsd: pnlSettled ? pnlUsd : undefined,
       });
       journal({
         kind: "execution", action: "arb", strategy: b.strategy, mode,
         tokenIn: qSym, tokenOut: qSym,
         amountIn: plan.quoteIn, expectedOut: plan.quoteOut,
-        actualOut: realizedQuote ?? undefined, txid, status: execStatus, pnlUsd,
+        actualOut: realizedQuote ?? undefined, txid, status: execStatus,
+        pnlUsd: pnlSettled ? pnlUsd : undefined,
         predEdgePct: plan.profitPct * 100,
-        realEdgePct:
-          (realizedQuote != null ? realizedQuote / plan.quoteIn : plan.quoteOut / plan.quoteIn - 1) * 100,
+        realEdgePct: pnlSettled
+          ? (realizedQuote != null ? realizedQuote / plan.quoteIn : plan.quoteOut / plan.quoteIn - 1) * 100
+          : undefined,
         platformFeeAmount: feeInfo?.amount,
         platformFeeToken: feeInfo?.symbol,
         platformFeeCollected:

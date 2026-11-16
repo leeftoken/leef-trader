@@ -10,7 +10,7 @@ type Migrated = {
 const migrate = (blob: unknown, version: number) =>
   useBot.persist.getOptions().migrate!(blob, version) as Migrated;
 
-describe("bot store v13 migration", () => {
+describe("bot store v14 migration", () => {
   it("v12 blob with legacy defaults gets the safer defaults + a notice, other settings kept", () => {
     const out = migrate(
       {
@@ -27,6 +27,31 @@ describe("bot store v13 migration", () => {
     expect(out.risk.maxPoolSharePct).toBe(5);
     expect(out.risk.maxImpactPct).toBe(2);
     expect(out.riskMigrationNotice).toMatch(/Safer risk defaults/);
+  });
+
+  it("v13 history keeps realized dollars but resets unreliable win-rate counters", () => {
+    const out = migrate(
+      { stats: { trades: 20, wins: 7, closedTrades: 7, liveWins: 5, liveClosedTrades: 6, paperWins: 2, paperClosedTrades: 2, realizedUsd: 42 } },
+      13,
+    );
+    expect(out.stats.trades).toBe(20);
+    expect(out.stats.closedTrades).toBe(0);
+    expect(out.stats.wins).toBe(0);
+    expect(out.stats.liveWins).toBe(0);
+    expect(out.stats.liveClosedTrades).toBe(0);
+    expect(out.stats.paperWins).toBe(0);
+    expect(out.stats.paperClosedTrades).toBe(0);
+    expect(out.stats.realizedUsd).toBe(42);
+  });
+
+  it("v14 completed-trade counters survive migration", () => {
+    const out = migrate(
+      { stats: { trades: 20, closedTrades: 8, wins: 5, realizedUsd: 42 } },
+      14,
+    );
+    expect(out.stats.trades).toBe(20);
+    expect(out.stats.closedTrades).toBe(8);
+    expect(out.stats.wins).toBe(5);
   });
 
   it("an explicit 0 saved AFTER v13 is respected", () => {

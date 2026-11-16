@@ -437,10 +437,10 @@ export const useBot = create<BotState>()(
       // v11: stats.byStrategyPaper — paper/live calibration split. The merge
       // below ({ ...freshStats(0), ...p.stats }) fills it for old saves.
       // v12: strategyHalt — persisted retry-storm halt flag (null for old saves).
-      // v13: safer risk defaults — breakers on (maxDrawdownPct 0 → 10, new
-      // maxDailyLossPct 3), pacing at the OLD defaults (120/h, 15 s) moves to
-      // 20/h, 30 s, new maxPoolSharePct 5. A user can set 0 again afterwards.
-      version: 13,
+      // v13: safer risk defaults.
+      // v14: distinguish executed transactions from settled closed outcomes.
+      // Legacy win counters have no trustworthy denominator, so reset them.
+      version: 14,
       migrate: (persisted, version) => {
         const p = (
           persisted && typeof persisted === "object" ? persisted : {}
@@ -494,7 +494,23 @@ export const useBot = create<BotState>()(
           gridAnchor: p.gridAnchor ?? null,
           stats:
             p.stats && typeof p.stats === "object"
-              ? { ...freshStats(0), ...p.stats }
+              ? {
+                  ...freshStats(0),
+                  ...p.stats,
+                  closedTrades:
+                    version >= 14 && Number.isFinite((p.stats as BotStats).closedTrades)
+                      ? Math.max(0, (p.stats as BotStats).closedTrades)
+                      : 0,
+                  wins: version >= 14 ? Math.max(0, Number((p.stats as BotStats).wins) || 0) : 0,
+                  liveClosedTrades:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).liveClosedTrades) || 0) : 0,
+                  liveWins:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).liveWins) || 0) : 0,
+                  paperClosedTrades:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).paperClosedTrades) || 0) : 0,
+                  paperWins:
+                    version >= 14 ? Math.max(0, Number((p.stats as BotStats).paperWins) || 0) : 0,
+                }
               : freshStats(0),
           series: Array.isArray(p.series) ? p.series : [],
           decisions: Array.isArray(p.decisions) ? p.decisions : [],

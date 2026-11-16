@@ -205,6 +205,8 @@ export type StrategyEvidence = {
   confirmed: number;
   unknown: number;
   paper: number;
+  /** Settled closed outcomes; excludes entry legs and unresolved transactions. */
+  closedTrades: number;
   wins: number;
   pnlUsd: number;
   liveWins: number;
@@ -267,6 +269,7 @@ function blankStrategyEvidence(strategy: string): StrategyEvidence {
     confirmed: 0,
     unknown: 0,
     paper: 0,
+    closedTrades: 0,
     wins: 0,
     pnlUsd: 0,
     liveWins: 0,
@@ -340,35 +343,37 @@ export function aggregateEntries(entries: JournalEntry[]): EvidenceStats {
           venueImpact.sumAbsPct += Math.abs(e.venueImpactPct);
         }
         break;
-      case "execution":
+      case "execution": {
         // Self-impact follow-up entries are observations, not new executions.
         if (e.amountIn == null && e.expectedOut == null && e.selfImpactPct != null) break;
         s.executions += 1;
         // Only transfer-reconciled LIVE fills and modeled PAPER fills have a
         // settled outcome. RPC inclusion alone is not a fill; UNKNOWN/INCLUDED
         // rows must never contribute estimated router P&L or win counts.
-        if (e.status === "confirmed") {
-          s.confirmed += 1;
-          const pnl = e.pnlUsd ?? 0;
+        if (e.status === "confirmed") s.confirmed += 1;
+        else if (e.status === "paper") s.paper += 1;
+        else if (e.status === "unknown" || e.status === "included") s.unknown += 1;
+        const hasSettledOutcome =
+          e.pnlUsd != null &&
+          Number.isFinite(e.pnlUsd) &&
+          (e.status === "confirmed" || e.status === "paper") &&
+          (e.action === "sell" || e.action === "arb" || e.action === "swap");
+        if (hasSettledOutcome) {
+          const pnl = e.pnlUsd!;
+          s.closedTrades += 1;
           if (pnl > 0) s.wins += 1;
           s.pnlUsd += pnl;
-          if (e.mode === "live") {
+          if (e.status === "confirmed" && e.mode === "live") {
             if (pnl > 0) s.liveWins += 1;
             s.livePnlUsd += pnl;
           }
-        } else if (e.status === "paper") {
-          s.paper += 1;
-          const pnl = e.pnlUsd ?? 0;
-          if (pnl > 0) s.wins += 1;
-          s.pnlUsd += pnl;
-          if (e.mode === "paper") {
+          if (e.status === "paper" && e.mode === "paper") {
             if (pnl > 0) s.paperWins += 1;
             s.paperPnlUsd += pnl;
           }
-        } else if (e.status === "unknown" || e.status === "included") {
-          s.unknown += 1;
         }
         break;
+      }
       case "calibration":
         if (e.predEdgePct != null) {
           s.predEdgePctSum += e.predEdgePct;

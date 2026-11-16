@@ -4,6 +4,7 @@ import { useBot } from "./bot";
 type Migrated = {
   goals: { maxDrawdownPct: number; maxDailyLossPct: number; takeProfitPct: number };
   risk: { maxTradesHour: number; cooldownSec: number; maxPoolSharePct: number; maxImpactPct: number };
+  stats: { trades: number; closedTrades: number; wins: number; realizedUsd: number; liveWins: number; liveClosedTrades: number; paperWins: number; paperClosedTrades: number };
   riskMigrationNotice: string | null;
 };
 

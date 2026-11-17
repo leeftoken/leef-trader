@@ -396,9 +396,51 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
   return questions;
 }
 
-/** Noul → confidence in whichever side it picked (0.5 = pure uncertainty). */
+/**
+ * Stable, exact identity for the deterministic candidate Jev judged.
+ *
+ * Amount-independent route signatures are useful for route caching, but are
+ * not sufficient authorization identities. Bind a Jev proposal to every
+ * execution-relevant candidate field so an approval cannot be replayed for a
+ * different clip, token contract, output estimate, edge, impact or path.
+ */
+export function buildAiCandidateKey(
+  strategy: string,
+  kind: AiCandidateKind,
+  candidate: Omit<AiCandidateSummary, "kind" | "key">,
+  routeSignature: string,
+): string {
+  const finite = (value: number | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const token = (value: string | undefined, upper = false): string | null => {
+    if (typeof value !== "string" || value.trim().length === 0) return null;
+    return upper ? value.trim().toUpperCase() : value.trim().toLowerCase();
+  };
+  const fingerprint = [
+    "jev-candidate-v1",
+    strategy,
+    kind,
+    token(candidate.tokenIn, true),
+    token(candidate.tokenInContract),
+    token(candidate.tokenOut, true),
+    token(candidate.tokenOutContract),
+    finite(candidate.amountIn),
+    finite(candidate.amountUsd),
+    finite(candidate.expectedOut),
+    finite(candidate.expectedNetEdgePct),
+    finite(candidate.priceImpactPct),
+    Array.isArray(candidate.poolIds) ? candidate.poolIds : [],
+    finite(candidate.hops),
+    routeSignature,
+  ];
+  return JSON.stringify(fingerprint);
+}
+
+/** Noul → confidence in the yes/no answer (0.5 = uncertain, 1 = certain). */
 function noulConfidence(noul: number): number {
-  return Math.abs(noul - 0.5) * 2;
+  // System One Noul is P(yes), not a centered confidence score. Confidence
+  // is the probability of the selected side: max(P(yes), P(no)).
+  return Math.max(noul, 1 - noul);
 }
 
 function choiceOf(

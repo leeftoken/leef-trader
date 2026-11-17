@@ -5,7 +5,7 @@ This document describes the intended production semantics for the two AI control
 ## Authority model
 
 1. **Deterministic trading engine** creates and sizes candidate opportunities, calculates route economics, and owns protective exits.
-2. **Jev / TypeSafe System One** judges an existing eligible buy or swap candidate. It can accept or reject the candidate and choose a bounded size bucket. It cannot create a trade from HOLD, choose another token pair, choose a route, or sign.
+2. **Jev / TypeSafe System One** judges an existing eligible buy, swap, or atomic arbitrage candidate. It can accept or reject the candidate; for buy/swap it may choose a bounded size bucket, while atomic arbitrage is accepted or rejected at its engine-defined size. It cannot create a trade from HOLD, choose another token pair, choose a route, resize an arb, or sign.
 3. **AI Helper** performs slower strategic evidence review. In CONTROLLED LEARNING it can propose bounded learning artifacts; the deterministic Learning Governor decides whether they survive shadow evaluation and promotion.
 4. **Execution gauntlet** remains the only transaction authority: fresh execution state, size and edge checks, route verification, portfolio governor, resource preflight, policy, simulation, signing and reconciliation.
 
@@ -13,7 +13,7 @@ This document describes the intended production semantics for the two AI control
 
 | Control | Role | Frequency | If unavailable |
 |---|---|---|---|
-| Jev = CONTROL | Accept/reject the current deterministic buy/swap candidate | Background poll, nominal 45-second minimum interval | The eligible candidate is paused until a fresh matching judgement is available |
+| Jev = CONTROL | Accept/reject the exact deterministic buy/swap/arb candidate | A request starts for that candidate and the execution gate awaits that same response | The candidate is paused; the failure is surfaced in the decision log, with the configured TypeSafe backup path tried when the primary is unavailable |
 | AI Helper = CONTROLLED LEARNING | Review trade and Jev evidence; propose bounded learning changes | Configured trade cadence, with a minimum five-minute review gap | Existing deterministic strategy and already-promoted learning continue; no new AI learning proposal is applied |
 
 The AI Helper is **not** a second per-trade approver. Making it approve every trade would add latency and another model failure point without improving the deterministic execution guarantees. Its value is in analysing accumulated outcomes and improving bounded strategy parameters over time.
@@ -23,19 +23,21 @@ The AI Helper is **not** a second per-trade approver. Making it approve every tr
 The application sends Jev:
 - Market regime, realized volatility, pool disagreement, danger score and quote age
 - Position size, entry mark, unrealized PnL, session results and configured risk limits
-- The deterministic candidate's token pair and contract identities, input amount, expected output/edge, impact, pool liquidity, pool path and hop count
-- A source snapshot timestamp, candidate identity, request time and returned model identifier
+- The deterministic candidate's token pair and contract identities, input amount, USD notional, expected output/net edge, impact, pool liquidity, pool IDs and hop count
+- For atomic arbitrage, the quote-token identity, volume/spread intent, exact round-trip input and return, both pool IDs and the atomic route identity
+- A source snapshot timestamp, versioned candidate fingerprint, request time and returned model identifier
 
-Jev can return only:
+Jev can return only the action allowed for the supplied candidate:
 - hold — reject the candidate
 - buy — accept the already-generated buy candidate
 - swap — accept the already-generated swap candidate
+- arb — accept the already-generated atomic quote→base→quote round-trip
 
-For buy and swap, Jev may choose a quarter, half or full size bucket. This is a cap on the engine candidate, not an instruction to increase it. If the selected size is below the deterministic minimum trade, the candidate is rejected.
+For buy and swap, Jev may choose a quarter, half or full size bucket. This is a cap on the engine candidate, not an instruction to increase it. If the selected size is below the deterministic minimum trade, the candidate is rejected. Atomic arb has no size bucket: Jev cannot resize it, change either pool, alter its route or change its token pair.
 
-Jev does not choose sell/stop actions. Protective sells and stops are engine-owned and bypass the Jev seam. Arbitrage and other unsupported candidate types remain deterministic.
+Jev does not choose sell/stop actions. Protective sells and stops are engine-owned and bypass the Jev seam. Candidate types not explicitly supported by the Jev schema remain deterministic.
 
-A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; or the strategy, candidate kind, token contracts, exact input amount, USD notional, expected output, expected net edge, price impact, pool path, hop count or route signature no longer match. The candidate fingerprint is versioned and includes all of those execution-relevant fields; route signatures alone are not sufficient because they are amount-independent.
+A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; or the strategy, candidate kind, token contracts, arb intent where applicable, exact input amount, USD notional, expected output, expected net edge, price impact, pool liquidity, pool path, hop count or route signature no longer match. The candidate fingerprint is versioned and includes all of those execution-relevant fields; route signatures alone are not sufficient because they are amount-independent.
 
 For a Noul answer, TypeSafe returns P(yes), not a centred confidence score. The confidence of the selected yes/no side is `max(noul, 1 - noul)`; `riskStress` must still be on the safe side (≤ 0.5) and `riskExecute` on the coherent/fresh side (≥ 0.5). Choice confidence is used as returned by TypeSafe. The proposal confidence is the weakest of the action, size and risk judgements. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
 

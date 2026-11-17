@@ -31,8 +31,6 @@ export interface AiProposal {
   model?: string;
   /** Deterministic candidate this judgement was restricted to. */
   candidateKind?: AiCandidateKind;
-  /** Atomic round-trip intent; present only for arb candidates. */
-  arbKind?: "volume" | "spread";
   /** Exact deterministic route candidate identity, not a model-generated value. */
   candidateKey?: string;
   /** Code-owned candidate details used for the dry-run UI and audit. */
@@ -42,6 +40,8 @@ export interface AiProposal {
 export interface AiCandidateSummary {
   kind: AiCandidateKind;
   key: string;
+  /** Atomic round-trip intent; present only for arb candidates. */
+  arbKind?: "volume" | "spread";
   tokenIn?: string;
   tokenInContract?: string;
   tokenOut?: string;
@@ -521,6 +521,8 @@ export function parseAiProposal(
   if (action === "buy" || action === "swap" || action === "arb") {
     // Acute stress vetoes entries, discretionary swaps and atomic round-trips.
     if (stress > 0.5) return null;
+  }
+  if (action === "buy" || action === "swap") {
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
     params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);

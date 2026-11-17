@@ -583,7 +583,7 @@ class MarketEngine {
     );
     if (changed === 0) return;
     const px = attachUsdPrices(nextLeef, nextAux, snap.waxUsd, undefined);
-    const changedIds = routeCache.notePools(nextLeef);
+    const changedIds = routeCache.notePools([...nextLeef, ...nextAux]);
     const patchedSnap: LeefSnapshot = {
       ...snap,
       pools: nextLeef,

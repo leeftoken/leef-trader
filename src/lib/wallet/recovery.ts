@@ -21,6 +21,7 @@ export type RecoveryAssessment =
       action: "buy" | "sell" | "swap" | "arb";
       actualIn: number;
       actualOut: number;
+      recoveredPnlUsd?: number;
       nextPosition: Position | null;
       note: string;
     }
@@ -169,11 +170,19 @@ export function assessUnknownExecution(
     if (!matchesExactDebit(actualIn, amountIn, input.decimals) || actualOut <= 0) {
       return { ok: false, reason: "On-chain transfers do not prove the full position debit and positive quote receipt." };
     }
+    const recoveredPnlUsd =
+      output.symbol === "WAX" &&
+      output.contract === "eosio.token" &&
+      Number.isFinite(entry.waxUsd) &&
+      (entry.waxUsd ?? 0) > 0
+        ? actualOut * entry.waxUsd! - position.entryCostUsd
+        : undefined;
     return {
       ok: true,
       action: "sell",
       actualIn,
       actualOut,
+      recoveredPnlUsd: Number.isFinite(recoveredPnlUsd) ? recoveredPnlUsd : undefined,
       nextPosition: null,
       note: "Full live position close reconstructed from exact on-chain debit/credit. Historical P&L is not fabricated.",
     };

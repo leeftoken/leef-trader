@@ -1,4 +1,5 @@
-import { aggregateFlowRisk, type FlowRiskContext, type PoolFlowState } from "./swap-flow";
+import { aggregateFlowRisk, type PoolFlowState } from "./swap-flow";
+import type { FlowRiskContext } from "@/lib/leef/regime";
 
 export type BotVolumeContext = {
   /** null means the flow tracker is disabled/unavailable; [] means enabled but no evidence. */

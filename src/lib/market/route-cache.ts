@@ -1,13 +1,11 @@
 /**
  * Dependency-aware route invalidation.
  *
- * A route is only as fresh as the pools it depends on. Every tracked pool has
- * a version counter; when on-chain state or an API pull changes a pool, its
- * version bumps and every cached route touching it is invalidated — while
- * routes on UNRELATED pools stay valid. An NFT mint changing some random
- * table does not invalidate the LEEF/WAX route.
+ * A route is only as fresh as the live pool graph it was computed against.
+ * Alcor LEEF pools and auxiliary WAX/stable reference pools both participate:
+ * state, price, fee, identity, and dependency-set changes invalidate a memo.
  */
-import type { LeefPool, SwapRoute } from "@/lib/leef/types";
+import type { AuxPool, LeefPool, SwapRoute } from "@/lib/leef/types";
 
 export type CachedRouteEntry = {
   /** Caller's identity for the computation (e.g. "swap:WAX>LEEF"). */
@@ -22,15 +20,52 @@ export type CachedRouteEntry = {
   createdAt: number;
 };
 
-/** Fields that matter for pool-state identity. */
-export function poolFingerprint(p: LeefPool): string {
+export type TrackedRoutePool = LeefPool | AuxPool;
+
+/** Fields that matter for executable route identity and pricing. */
+export function poolFingerprint(pool: TrackedRoutePool): string {
+  if ("leef" in pool) {
+    return [
+      "leef",
+      pool.id,
+      pool.fee,
+      pool.leef.symbol,
+      pool.leef.contract,
+      pool.pair.symbol,
+      pool.pair.contract,
+      pool.sqrtPriceX64 ?? "0",
+      pool.liquidity,
+      pool.leef.quantity,
+      pool.pair.quantity,
+      pool.pairPerLeef,
+    ].join("|");
+  }
   return [
-    p.sqrtPriceX64 ?? "0",
-    p.liquidity,
-    p.leef.quantity,
-    p.pair.quantity,
-    p.pairPerLeef,
+    "aux",
+    pool.id,
+    pool.venue ?? "alcor",
+    pool.fee,
+    pool.tokenA.symbol,
+    pool.tokenA.contract,
+    pool.tokenB.symbol,
+    pool.tokenB.contract,
+    pool.sqrtPriceX64 ?? "0",
+    pool.liquidity ?? "0",
+    pool.tokenA.quantity,
+    pool.tokenB.quantity,
+    pool.priceA ?? "0",
+    pool.priceB ?? "0",
   ].join("|");
+}
+
+function normalizedPoolIds(ids: number[]): number[] {
+  return [...new Set(ids)].sort((a, b) => a - b);
+}
+
+function samePoolSet(a: number[], b: number[]): boolean {
+  const left = normalizedPoolIds(a);
+  const right = normalizedPoolIds(b);
+  return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
 export class RouteCache {
@@ -43,18 +78,34 @@ export class RouteCache {
   }
 
   /**
-   * Compare incoming pool rows with the last fingerprint; bump the version
-   * of every pool that meaningfully changed. Returns the changed ids —
-   * unchanged pools keep their routes valid.
+   * Compare incoming rows with the last fingerprint; bump versions of changed
+   * pools and discard state for pools no longer in the live snapshot.
+   * Callers must pass BOTH snapshot.pools and snapshot.aux.
    */
-  notePools(pools: LeefPool[]): number[] {
+  notePools(pools: TrackedRoutePool[]): number[] {
+    const activeIds = new Set(pools.map((pool) => pool.id));
+    const removedIds = new Set<number>();
+
+    for (const id of this.prints.keys()) {
+      if (activeIds.has(id)) continue;
+      this.prints.delete(id);
+      this.versions.delete(id);
+      removedIds.add(id);
+    }
+
+    if (removedIds.size > 0) {
+      for (const [key, entry] of this.entries) {
+        if (entry.poolIds.some((id) => removedIds.has(id))) this.entries.delete(key);
+      }
+    }
+
     const changed: number[] = [];
-    for (const p of pools) {
-      const fp = poolFingerprint(p);
-      if (this.prints.get(p.id) !== fp) {
-        this.prints.set(p.id, fp);
-        this.versions.set(p.id, (this.versions.get(p.id) ?? 0) + 1);
-        changed.push(p.id);
+    for (const pool of pools) {
+      const fp = poolFingerprint(pool);
+      if (this.prints.get(pool.id) !== fp) {
+        this.prints.set(pool.id, fp);
+        this.versions.set(pool.id, (this.versions.get(pool.id) ?? 0) + 1);
+        changed.push(pool.id);
       }
     }
     return changed;
@@ -113,22 +164,23 @@ export class RouteCache {
 export const routeCache = new RouteCache();
 
 /**
- * Memoized route computation with dependency awareness: recompute only when
- * the involved pool versions or the inputs change. Nothing relevant changed
- * → the previous list is returned as-is (same references, so downstream
- * React memos hold too).
+ * Memoized route computation with dependency awareness: recompute when inputs,
+ * pool versions, OR the live dependency set changes. A pool disappearing from
+ * the book must never leave a cached path pointing at that removed pool.
  */
 export function routesCached(
   compute: () => SwapRoute[],
   opts: { key: string; poolIds: number[]; inputsKey: string },
 ): SwapRoute[] {
+  const poolIds = normalizedPoolIds(opts.poolIds);
   const versions: Record<number, number> = {};
-  for (const id of opts.poolIds) versions[id] = routeCache.versionOf(id);
+  for (const id of poolIds) versions[id] = routeCache.versionOf(id);
   const entry = routeCache.get(opts.key);
   if (
     entry &&
     entry.inputsKey === opts.inputsKey &&
-    opts.poolIds.every((id) => versions[id] === entry.poolVersions[id])
+    samePoolSet(entry.poolIds, poolIds) &&
+    poolIds.every((id) => versions[id] === entry.poolVersions[id])
   ) {
     return entry.routes;
   }
@@ -138,7 +190,7 @@ export function routesCached(
       key: opts.key,
       inputsKey: opts.inputsKey,
       routes,
-      poolIds: opts.poolIds,
+      poolIds,
       poolVersions: versions,
     });
   }

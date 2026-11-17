@@ -32,7 +32,7 @@ import {
   type PendingCounterfactual,
   type Profile,
 } from "./learning";
-import { journal, onJournalEntry, type JournalEntry } from "./journal";
+import { journal, journalAll, onJournalEntry, type JournalEntry } from "./journal";
 import { rankExecutionRoutes } from "./route-optimizer";
 import type { LeefSnapshot } from "./types";
 
@@ -46,6 +46,7 @@ const LS_KEY = "leef-learning-v1";
 let profiles: LearningProfiles = {};
 const artifacts: Record<string, LearningArtifact> = {};
 let booted = false;
+let learningBootInFlight: Promise<JournalEntry[]> | null = null;
 let dirty = false;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -179,6 +180,26 @@ export async function bootLearning(allEntries: JournalEntry[]): Promise<void> {
   profiles = rebuildProfiles(allEntries, cfg);
   booted = true;
   onJournalEntry(onEntry);
+}
+
+/**
+ * Read and rebuild learning state once while the first live snapshots arrive.
+ * Market and on-chain spot ticks can arrive during IndexedDB startup; they all
+ * share this promise instead of issuing duplicate full getAll() journal reads.
+ * After boot, callers that need current evidence still get a fresh journal read.
+ */
+export function bootLearningFromJournal(): Promise<JournalEntry[]> {
+  if (booted) return journalAll();
+  if (!learningBootInFlight) {
+    const loading = journalAll().then(async (entries) => {
+      await bootLearning(entries);
+      return entries;
+    });
+    learningBootInFlight = loading.finally(() => {
+      learningBootInFlight = null;
+    });
+  }
+  return learningBootInFlight;
 }
 
 export function learningBooted(): boolean {

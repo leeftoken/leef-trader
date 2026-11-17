@@ -124,7 +124,10 @@ const swapContext: AiProposalContext = {
 describe("buildAiQuestions", () => {
   it("offers only the action types allowed for the exact deterministic candidate", () => {
     const q = buildAiQuestions(summary());
-    const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
+    const actionQuestion = q[AI_QID.action] as { instructions: string; criteria: Record<string, unknown> };
+    expect(actionQuestion.instructions).toContain("USD notional");
+    expect(actionQuestion.instructions).toContain("pool liquidity");
+    const criteria = actionQuestion.criteria;
     expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");

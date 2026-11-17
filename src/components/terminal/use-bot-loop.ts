@@ -49,7 +49,8 @@ import {
   aiSummaryOf,
   buildAiQuestions,
   parseAiProposal,
-  isAiProposalFresh,
+  isAiProposalForCandidate,
+  makeAiCandidateKey,
   type AiCandidateKind,
   type AiCandidateSummary,
   type AiProposal,
@@ -113,9 +114,11 @@ function maybeKickAiPoll(
   const terminal = useTerminal.getState();
   const aiMode = terminal.aiControl;
   if (aiMode === "off") return;
-  if (aiMode === "control" && candidateKind === "other") {
+  // Jev judges an existing eligible engine candidate only. Do not spend a
+  // request on HOLD/STOP/ARB or present a previous candidate as current.
+  if (candidateKind === "other") {
     terminal.setAiProposal(null);
-    aiLastPollAt = 0;
+    if (aiMode === "control") aiLastPollAt = 0;
     return;
   }
   if (snap.source !== "live") return;
@@ -123,18 +126,28 @@ function maybeKickAiPoll(
   if (aiPollInFlight || now - aiLastPollAt < AI_POLL_MS) return;
   aiPollInFlight = true;
   aiLastPollAt = now;
-  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey, candidateDetails);
+  const requestedMode = aiMode;
+  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey, candidateDetails, mode);
   const requestedAt = Date.now();
   void (async () => {
     try {
       const res = await askJev(summary, buildAiQuestions(summary));
       const receivedAt = Date.now();
+      // A suggestion request that completes after a user mode change must not
+      // silently become an execution approval in the new mode.
+      const currentTerminal = useTerminal.getState();
+      if (currentTerminal.aiControl !== requestedMode) {
+        currentTerminal.setAiProposal(null);
+        aiLastPollAt = 0;
+        return;
+      }
       const proposal = res
         ? parseAiProposal(res.answers, {
             snapshotFetchedAt: summary.fetchedAt,
             requestedAt,
             receivedAt,
             model: res.model,
+            executionMode: mode,
             candidateKind: summary.candidateKind,
             candidateKey: summary.candidateKey,
             candidate: summary.candidate,
@@ -687,12 +700,12 @@ async function runBotOnceInner(
             hops: decision.route.legs.length,
           }
         : {};
-  const candidateKey =
-    decision.kind === "buy"
-      ? `${b.strategy}:buy:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
-      : decision.kind === "swap"
-        ? `${b.strategy}:swap:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
-        : "other";
+  const candidateKey = makeAiCandidateKey(
+    b.strategy,
+    mode,
+    candidateKind,
+    candidateDetails,
+  )
   // Jev judges the existing strategy/token-pair candidate. It cannot invent
   // another trade type or token pair; route selection remains engine-owned.
   maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
@@ -803,16 +816,17 @@ async function runBotOnceInner(
     const currentSnapshotAt = snapFreshAtMs(snap);
     const fresh: AiProposal | null =
       Number.isFinite(currentSnapshotAt) &&
-      isAiProposalFresh(
+      isAiProposalForCandidate(
         p,
         new Date(currentSnapshotAt).toISOString(),
         cycleT0,
+        decision.kind,
+        candidateKey,
+        mode,
         AI_PROPOSAL_MAX_AGE_MS,
-      ) &&
-      p?.candidateKind === decision.kind &&
-      p?.candidateKey === candidateKey
+      )
         ? p
-        : null;
+        : null
     const aiHold = (reason: string): Decision => {
       b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
       b.setLastReason(reason);
@@ -824,7 +838,7 @@ async function runBotOnceInner(
     journal({
       kind: "gate",
       gate: "ai",
-      pass: fresh.confidence >= AI_EXEC_CONFIDENCE_MIN,
+      pass: fresh.action !== "hold" && fresh.confidence >= AI_EXEC_CONFIDENCE_MIN,
       reason: `Jev ${fresh.action} ${fresh.candidateKind} candidate · weakest=${fresh.weakest} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`,
       strategy: b.strategy,
       mode,
@@ -839,6 +853,9 @@ async function runBotOnceInner(
     if (fresh.action === "hold") {
       return aiHold(`AI control: Jev rejected the ${fresh.candidateKind} candidate — ${fresh.rationale}`);
     }
+    // A Jev approval is one-shot. It may authorize at most one execution
+    // attempt, even when a later market cycle repeats the same candidate key.
+    useTerminal.getState().setAiProposal(null);
     const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
     const tag = `AI · Jev accepted ${fresh.candidateKind} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;
     if (fresh.action === "buy" && decision.kind === "buy") {

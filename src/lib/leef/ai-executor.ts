@@ -10,8 +10,8 @@ import { classifyRegime, dangerScore } from "./regime";
 import type { JevAnswers, JevQuestion } from "./jev-client";
 import { snapFreshAtMs, type LeefSnapshot } from "./types";
 
-export type AiAction = "hold" | "buy" | "swap";
-export type AiCandidateKind = "buy" | "swap" | "other" | "preview";
+export type AiAction = "hold" | "buy" | "swap" | "arb";
+export type AiCandidateKind = "buy" | "swap" | "arb" | "other" | "preview";
 
 export interface AiProposal {
   action: AiAction;
@@ -40,6 +40,8 @@ export interface AiProposal {
 export interface AiCandidateSummary {
   kind: AiCandidateKind;
   key: string;
+  /** Atomic round-trip intent; present only for arb candidates. */
+  arbKind?: "volume" | "spread";
   tokenIn?: string;
   tokenInContract?: string;
   tokenOut?: string;
@@ -82,7 +84,7 @@ export const AI_QID = {
   riskExecute: "risk_execute",
 } as const;
 
-const AI_ACTIONS: AiAction[] = ["hold", "buy", "swap"];
+const AI_ACTIONS: AiAction[] = ["hold", "buy", "swap", "arb"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
@@ -253,9 +255,11 @@ export function aiSummaryOf(
       ? ["hold", "buy"]
       : candidateKind === "swap"
         ? ["hold", "swap"]
-        : candidateKind === "preview"
-          ? ["hold", "buy"]
-          : ["hold"];
+        : candidateKind === "arb"
+          ? ["hold", "arb"]
+          : candidateKind === "preview"
+            ? ["hold", "buy"]
+            : ["hold"];
   const uniqueContract = (symbol: string): string | undefined => {
     const matches = tokenUniverse.filter((t) => t.symbol === symbol);
     return matches.length === 1 ? matches[0]!.contract : undefined;
@@ -354,12 +358,15 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
   if (summary.allowedActions.includes("swap")) {
     actionCriteria.swap = "Accept the deterministic engine's already-generated swap candidate. Do not change its token pair or invent a route.";
   }
+  if (summary.allowedActions.includes("arb")) {
+    actionCriteria.arb = "Accept the deterministic engine's already-generated atomic quote→base→quote round-trip. Judge its exact input amount, expected return, pool IDs, impact and bounded volume/profit intent. Do not change its size, route, pools or tokens, and do not invent another trade.";
+  }
 
   const questions: Record<string, JevQuestion> = {
     [AI_QID.action]: {
       type: "choice",
       instructions:
-        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its exact token pair and contract identities, input amount and USD notional, expected output/net edge, price impact, pool liquidity, pool IDs and hop count together with state.market, balances and position details. Choose hold to reject it, or the matching candidate action to accept it. You may choose only the supplied size bucket; never invent a trade, change the candidate type or token pair, or choose a route. The engine recalculates the route.",
+        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its exact token pair and contract identities, input amount and USD notional, expected output/net edge, price impact, pool liquidity, pool IDs and hop count together with state.market, balances and position details. Choose hold to reject it or the matching candidate action to accept it. For buy/swap only, choose a supplied size bucket that can only reduce the candidate. For arb, accept or reject the atomic round-trip exactly as supplied; do not resize it. Never invent a trade, change the candidate type, token pair or route. The engine retains route and execution authority.",
       criteria: actionCriteria,
     },
     [AI_QID.riskStress]: {
@@ -425,6 +432,7 @@ export function buildAiCandidateKey(
     token(candidate.tokenInContract),
     token(candidate.tokenOut, true),
     token(candidate.tokenOutContract),
+    candidate.arbKind ?? null,
     finite(candidate.amountIn),
     finite(candidate.amountUsd),
     finite(candidate.expectedOut),
@@ -511,9 +519,11 @@ export function parseAiProposal(
     // Acting on incoherent data is never usable. Exits still require coherent data.
     if (execOk < 0.5) return null;
   }
-  if (action === "buy" || action === "swap") {
-    // Acute stress vetoes entries and discretionary swaps.
+  if (action === "buy" || action === "swap" || action === "arb") {
+    // Acute stress vetoes entries, discretionary swaps and atomic round-trips.
     if (stress > 0.5) return null;
+  }
+  if (action === "buy" || action === "swap") {
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
     params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);
@@ -535,6 +545,29 @@ export function parseAiProposal(
     params.tokenIn = candidate.tokenIn;
     params.tokenOut = candidate.tokenOut;
     rationale.push(candidate.tokenIn + "→" + candidate.tokenOut);
+  }
+
+  if (action === "arb") {
+    // An atomic round-trip is a code-owned candidate, not a model-authored route.
+    // It intentionally uses the same quote token on input and output, and it
+    // keeps the deterministic engine's already-selected size (no Jev resizing).
+    const candidate = context?.candidate;
+    if (
+      context?.candidateKind !== "arb" ||
+      candidate?.kind !== "arb" ||
+      (candidate.arbKind !== "volume" && candidate.arbKind !== "spread") ||
+      !candidate.tokenIn ||
+      !candidate.tokenInContract ||
+      candidate.tokenIn !== candidate.tokenOut ||
+      candidate.tokenInContract !== candidate.tokenOutContract ||
+      !(typeof candidate.amountIn === "number" && Number.isFinite(candidate.amountIn) && candidate.amountIn > 0) ||
+      !(typeof candidate.expectedOut === "number" && Number.isFinite(candidate.expectedOut) && candidate.expectedOut > 0) ||
+      !Array.isArray(candidate.poolIds) ||
+      candidate.poolIds.length === 0 ||
+      !candidate.poolIds.every((id) => Number.isInteger(id) && id >= 0) ||
+      !(typeof candidate.hops === "number" && Number.isInteger(candidate.hops) && candidate.hops > 0)
+    ) return null;
+    rationale.push(`atomic ${candidate.arbKind} ${candidate.tokenIn} round-trip`);
   }
 
   rationale.push("exec_ok=" + execOk.toFixed(2), "stress=" + stress.toFixed(2));

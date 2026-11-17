@@ -185,6 +185,12 @@ describe("buildAiCandidateKey", () => {
     expect(buildAiCandidateKey("grid", "buy", details, "direct:217")).not.toBe(base);
   });
 
+  it("binds atomic arb identity to its arb kind", () => {
+    const volume = buildAiCandidateKey("volume", "arb", { ...details, arbKind: "volume" }, "atomic:217>218");
+    const spread = buildAiCandidateKey("volume", "arb", { ...details, arbKind: "spread" }, "atomic:217>218");
+    expect(volume).not.toBe(spread);
+  });
+
   it("normalizes token identity while preserving exact numeric candidate values", () => {
     const base = buildAiCandidateKey("auto", "buy", details, "direct:217");
     const normalized = buildAiCandidateKey("auto", "buy", {
@@ -324,10 +330,69 @@ describe("isAiProposalFresh", () => {
     expect(isAiProposalFresh(bound, "1970-01-01T00:01:45.000Z", 99_000)).toBe(false);
   });
 
+  it("does not treat a response as fresh at request-start time before it has arrived", () => {
+    const proposal = parseAiProposal(answers(), context)!;
+    expect(isAiProposalFresh(proposal, "1970-01-01T00:01:45.000Z", context.requestedAt)).toBe(false);
+    expect(isAiProposalFresh(proposal, "1970-01-01T00:01:45.000Z", context.receivedAt)).toBe(true);
+  });
+
   it("rejects delayed, future-dated or late-arriving responses", () => {
     const delayed = parseAiProposal(answers(), { ...context, receivedAt: 140_001 })!;
     expect(isAiProposalFresh(delayed, "1970-01-01T00:01:45.000Z", 141_000)).toBe(false);
     const future = parseAiProposal(answers(), { ...context, receivedAt: 110_000 })!;
     expect(isAiProposalFresh(future, "1970-01-01T00:01:45.000Z", 109_000)).toBe(false);
+  });
+});
+
+
+describe("atomic arb Jev judgement", () => {
+  const summaryWithArb = {
+    ...summary(),
+    candidateKind: "arb" as never,
+    candidateKey: "volume:atomic:217>218",
+    candidate: {
+      kind: "arb" as never,
+      key: "volume:atomic:217>218",
+      arbKind: "volume" as const,
+      tokenIn: "WAX",
+      tokenInContract: "eosio.token",
+      tokenOut: "WAX",
+      tokenOutContract: "eosio.token",
+      amountIn: 10,
+      amountUsd: 0.047,
+      expectedOut: 9.9,
+      expectedNetEdgePct: -1,
+      priceImpactPct: 0.2,
+      liquidityUsd: 900,
+      poolIds: [217, 218],
+      hops: 2,
+    },
+    allowedActions: ["hold", "arb"] as never,
+  };
+
+  it("offers Jev accept/reject for an atomic volume candidate without asking it to resize the route", () => {
+    const questions = buildAiQuestions(summaryWithArb);
+    const action = questions[AI_QID.action] as { instructions: string; criteria: Record<string, unknown> };
+    expect(Object.keys(action.criteria)).toEqual(["hold", "arb"]);
+    expect(action.instructions.toLowerCase()).toContain("atomic");
+    expect(questions[AI_QID.sizeBucket]).toBeUndefined();
+  });
+
+  it("parses an approval bound to the exact atomic volume candidate", () => {
+    const candidateContext = {
+      ...context,
+      candidateKind: "arb" as never,
+      candidateKey: summaryWithArb.candidateKey,
+      candidate: summaryWithArb.candidate,
+      allowedActions: ["hold", "arb"] as never,
+    };
+    const response = answers({
+      [AI_QID.action]: { type: "choice", choice: "arb", confidence: 0.94 },
+    });
+    delete response[AI_QID.sizeBucket];
+    const proposal = parseAiProposal(response, candidateContext);
+    expect(proposal?.action).toBe("arb");
+    expect(proposal?.candidateKey).toBe("volume:atomic:217>218");
+    expect(proposal?.params.sizePct).toBeUndefined();
   });
 });

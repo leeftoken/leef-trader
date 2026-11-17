@@ -200,8 +200,12 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={b.running ? (liveReady ? "leef" : "accent") : "plain"}>
-            {b.running ? (liveReady ? "Live · running" : "Unsigned · running") : "Stopped"}
+          <Badge variant={hasRecoveryLock ? "warn" : b.running ? (liveReady ? "leef" : "accent") : "plain"}>
+            {hasRecoveryLock
+              ? "Live · recovery locked"
+              : b.running
+                ? (liveReady ? "Live · running" : "Unsigned · running")
+                : "Stopped"}
           </Badge>
           <Badge variant="plain">
             {b.stats.trades} executions · {b.stats.closedTrades} closed · {b.tradesThisHour}/{b.risk.maxTradesHour} this hour
@@ -223,6 +227,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                   ? `Transaction ${unresolvedTxid.slice(0, 12)}… is ${unresolvedPhase}. Inspect chain settlement before resuming.`
                   : "A signing attempt was interrupted before a transaction ID was saved. Check wallet activity before trading again."}
               </p>
+              {unresolvedTxid && (
+                <p className="mt-2 break-all rounded border border-border/60 bg-background/70 p-2 font-mono text-[11px] text-muted-foreground select-all">
+                  {unresolvedTxid}
+                </p>
+              )}
             </div>
             {unresolvedTxid && (
               <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
@@ -394,7 +403,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 variant="leef"
                 className="h-12 w-full text-base"
                 onClick={onStart}
-                disabled={!liveBook}
+                disabled={!liveBook || hasRecoveryLock}
               >
                 <CirclePlay className="size-4" />
                 {confirmLive
@@ -434,7 +443,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busyForce || !liveBook}
+                disabled={busyForce || !liveBook || hasRecoveryLock}
                 onClick={() => onForce("buy")}
               >
                 {confirmForce === "buy" ? "Confirm live buy" : "Buy a clip now"}
@@ -442,7 +451,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busyForce || !b.position}
+                disabled={busyForce || !b.position || hasRecoveryLock}
                 onClick={() => onForce("sell")}
               >
                 {confirmForce === "sell" ? "Confirm live sell" : "Sell position now"}

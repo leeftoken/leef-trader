@@ -207,3 +207,44 @@ describe("matchesExactDebit", () => {
     expect(matchesExactDebit(Number.NaN, 10, 8)).toBe(false);
   });
 });
+
+
+describe("Hyperion notification de-duplication", () => {
+  const duplicateNotification = {
+    creator_action_ordinal: 77,
+    act: {
+      account: "eosio.token",
+      name: "transfer",
+      data: { from: ACCOUNT, to: "swap.alcor", quantity: "3.39026300 WAX", memo: "swap" },
+    },
+  };
+
+  it("collapses notification documents sharing a creator_action_ordinal", () => {
+    const parsed = parseHyperionTransfers({
+      executed: true,
+      actions: [duplicateNotification, { ...duplicateNotification }],
+    });
+    expect(parsed?.transfers).toHaveLength(1);
+    expect(parsed?.transfers[0]?.quantity).toBe("3.39026300 WAX");
+  });
+
+  it("preserves genuinely distinct identical transfers with different creator ordinals", () => {
+    const parsed = parseHyperionTransfers({
+      executed: true,
+      actions: [
+        duplicateNotification,
+        { ...duplicateNotification, creator_action_ordinal: 78 },
+      ],
+    });
+    expect(parsed?.transfers).toHaveLength(2);
+  });
+
+  it("does not content-dedupe identical transfers when the provider omits ordinals", () => {
+    const withoutOrdinal = { act: duplicateNotification.act };
+    const parsed = parseHyperionTransfers({
+      executed: true,
+      actions: [withoutOrdinal, { ...withoutOrdinal }],
+    });
+    expect(parsed?.transfers).toHaveLength(2);
+  });
+});

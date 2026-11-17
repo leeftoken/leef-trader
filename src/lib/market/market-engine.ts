@@ -41,7 +41,7 @@ import { useBot } from "@/store/bot";
 import { usePortfolio } from "@/store/portfolio";
 import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
 import { useWallet } from "@/store/wallet";
-import { botOnSnapshot } from "@/components/terminal/use-bot-loop";
+import { botCycleInFlight, botOnSnapshot } from "@/components/terminal/use-bot-loop";
 import { rebalancerOnSnapshot } from "@/components/terminal/use-portfolio-loop";
 import { syncWalletBalances } from "@/components/terminal/use-wallet-sync";
 import { marketBus } from "./event-bus";
@@ -421,7 +421,10 @@ class MarketEngine {
           // and then checks the shared capital lane.
           void botOnSnapshot(snap)
             .then(() => {
-              rebalancerOnSnapshot(snap);
+              // A newer market tick can arrive while an older bot cycle is
+              // still evaluating. Never let maintenance race that capital
+              // decision merely because botOnSnapshot returned early.
+              if (!botCycleInFlight()) rebalancerOnSnapshot(snap);
             })
             .catch((err) => {
               const reason = err instanceof Error ? err.message : "strategy evaluation failed";

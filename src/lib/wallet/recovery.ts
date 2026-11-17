@@ -39,19 +39,22 @@ function sameToken(a: TokenMeta, b: TokenMeta): boolean {
   return a.symbol === b.symbol && a.contract.toLowerCase() === b.contract.toLowerCase();
 }
 
-function hasExternalTransfer(
+function externalTransferAmount(
   transfers: TxTransfer[],
   account: string,
   token: TokenMeta,
   direction: "out" | "in",
-): boolean {
-  return transfers.some((transfer) =>
-    transfer.symbol === token.symbol &&
-    transfer.contract.toLowerCase() === token.contract.toLowerCase() &&
-    (direction === "out"
+): number {
+  return transfers.reduce((total, transfer) => {
+    if (
+      transfer.symbol !== token.symbol ||
+      transfer.contract.toLowerCase() !== token.contract.toLowerCase()
+    ) return total;
+    const matches = direction === "out"
       ? transfer.from === account && transfer.to !== account
-      : transfer.to === account && transfer.from !== account),
-  );
+      : transfer.to === account && transfer.from !== account;
+    return matches ? total + transfer.amount : total;
+  }, 0);
 }
 
 function positionDeltaIsZero(
@@ -203,11 +206,13 @@ export function assessUnknownExecution(
     if (!sameToken(input, output)) {
       return { ok: false, reason: "The saved arbitrage record does not use one quote token on both legs." };
     }
+    const grossQuoteSent = externalTransferAmount(transfers, context.account, input, "out");
+    const grossQuoteReceived = externalTransferAmount(transfers, context.account, input, "in");
     if (
-      !hasExternalTransfer(transfers, context.account, input, "out") ||
-      !hasExternalTransfer(transfers, context.account, input, "in")
+      !matchesExactDebit(-grossQuoteSent, amountIn, input.decimals) ||
+      grossQuoteReceived <= 0
     ) {
-      return { ok: false, reason: "Both quote-token outflow and inflow are required to reconcile this arbitrage." };
+      return { ok: false, reason: "The arbitrage must prove the exact gross quote-token debit and a positive quote-token receipt." };
     }
     if (context.position && !positionDeltaIsZero(transfers, context.account, base)) {
       return { ok: false, reason: "The arbitrage changed the token underlying the open bot position." };

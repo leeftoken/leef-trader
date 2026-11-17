@@ -44,6 +44,8 @@ export type CounterfactualLabel = "TRUE_HOLD" | "FALSE_HOLD" | "NEUTRAL_HOLD";
 export type JournalEntry = {
   /** ms epoch. */
   ts: number;
+  /** ms epoch when a broadcast-unknown execution was reconciled from chain evidence. */
+  reconciledAt?: number;
   kind: JournalKind;
   strategy?: BotStrategy | string;
   mode?: "paper" | "live";
@@ -605,6 +607,76 @@ export async function journalStats(): Promise<EvidenceStats> {
 /** Every entry, oldest first — the learning store rebuilds profiles from this. */
 export async function journalAll(): Promise<JournalEntry[]> {
   return allEntries();
+}
+
+/**
+ * Resolve exactly one previously-unknown execution row after its chain
+ * transfers have been checked and the corresponding bot state was persisted.
+ * Idempotent when the same row was already settled. Ambiguous/missing rows
+ * fail closed so a transaction cannot be unlocked without its audit record.
+ */
+export async function settleUnknownExecution(
+  txid: string,
+  actualOut: number,
+): Promise<boolean> {
+  if (!/^[a-f0-9]{64}$/i.test(txid) || !Number.isFinite(actualOut)) return false;
+  try {
+    const entries = await allEntries();
+    const matching = entries.filter((e) => e.kind === "execution" && e.txid === txid);
+    const settled = matching.filter((e) => e.status === "confirmed" && e.reconciledAt != null);
+    if (settled.length === 1 && matching.length === 1) return true;
+    const pending = matching.filter((e) => e.status === "unknown");
+    if (pending.length !== 1 || matching.length !== 1) return false;
+    const targetTs = pending[0]!.ts;
+    const db = await openDb();
+    if (!db) return false;
+    return await new Promise<boolean>((resolve) => {
+      let matches = 0;
+      let updated = false;
+      try {
+        const tx = db.transaction(STORE, "readwrite");
+        const req = tx.objectStore(STORE).openCursor();
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) return;
+          const row = cursor.value as JournalEntry;
+          if (
+            row.kind === "execution" &&
+            row.txid === txid &&
+            row.ts === targetTs &&
+            row.status === "unknown"
+          ) {
+            matches += 1;
+            if (matches > 1) {
+              tx.abort();
+              return;
+            }
+            cursor.update({
+              ...row,
+              status: "confirmed",
+              actualOut,
+              reconciledAt: Date.now(),
+              reason: row.reason
+                ? `${row.reason} · reconciled from confirmed on-chain transfer evidence`
+                : "Reconciled from confirmed on-chain transfer evidence",
+            } satisfies JournalEntry);
+            updated = true;
+          }
+          cursor.continue();
+        };
+        req.onerror = () => {
+          try { tx.abort(); } catch { resolve(false); }
+        };
+        tx.oncomplete = () => resolve(matches === 1 && updated);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch {
+        resolve(false);
+      }
+    });
+  } catch {
+    return false;
+  }
 }
 
 /** Full export as an NDJSON blob, oldest entry first. */

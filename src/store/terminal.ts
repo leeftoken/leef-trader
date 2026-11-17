@@ -112,6 +112,12 @@ type TerminalState = {
   setAiGatewayUrl: (url: string) => void;
 };
 
+type PersistedTerminalState = Pick<
+  TerminalState,
+  "syncSec" | "aiGatewayUrl" | "swapMaxHops" | "aiEnabled" |
+  "flowGuardEnabled" | "learningMode" | "aiReviewEveryTrades"
+>;
+
 export const useTerminal = create<TerminalState>()(
   persist(
     (set, get) => ({
@@ -179,7 +185,13 @@ export const useTerminal = create<TerminalState>()(
       // v2 → v3: Jev CONTROL becomes session-only. Reset any previously
       // persisted authority to OFF so a browser upgrade/reload cannot retain
       // a prior live-trading authorization.
-      migrate: (persisted) => ({ ...(persisted as object), aiControl: "off" }),
+      migrate: (persisted): PersistedTerminalState => {
+        // Strip the v2 authorization field. The unpersisted store default is
+        // OFF, so rehydration cannot restore prior live-trading authority.
+        const migrated = { ...(persisted as object) } as Record<string, unknown>;
+        delete migrated.aiControl;
+        return migrated as PersistedTerminalState;
+      },
       partialize: (s) => ({
         syncSec: s.syncSec,
         aiGatewayUrl: s.aiGatewayUrl,

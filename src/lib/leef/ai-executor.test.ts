@@ -4,7 +4,6 @@ import {
   AI_QID,
   buildAiQuestions,
   isAiProposalFresh,
-  aiCandidateKeyOf,
   isAiProposalForCandidate,
   makeAiCandidateKey,
   parseAiProposal,
@@ -126,22 +125,25 @@ const swapContext: AiProposalContext = {
 };
 
 describe("AI candidate identity", () => {
-  it("binds Jev approval to the exact assessed amount as well as route and token contracts", () => {
-    const base = {
-      strategy: "auto",
-      kind: "buy" as const,
+  it("binds Jev approval to the assessed amount, route and token contracts", () => {
+    const candidate = {
       tokenIn: "WAX",
       tokenInContract: "eosio.token",
       tokenOut: "LEEF",
       tokenOutContract: "leefmaincorp",
-      routeKey: "direct:217",
       amountIn: 100,
+      amountUsd: 0.47,
+      expectedOut: 1_000_000,
+      expectedNetEdgePct: 1.2,
+      priceImpactPct: 0.2,
+      poolIds: [217],
+      hops: 1,
     };
-    const key = aiCandidateKeyOf(base);
-    expect(aiCandidateKeyOf({ ...base, amountIn: 101 })).not.toBe(key);
-    expect(aiCandidateKeyOf({ ...base, routeKey: "direct:218" })).not.toBe(key);
-    expect(aiCandidateKeyOf({ ...base, tokenOutContract: "fake.token" })).not.toBe(key);
-    expect(aiCandidateKeyOf(base)).toBe(key);
+    const key = makeAiCandidateKey("auto", "live", "buy", candidate);
+    expect(makeAiCandidateKey("auto", "live", "buy", { ...candidate, amountIn: 101 })).not.toBe(key);
+    expect(makeAiCandidateKey("auto", "live", "buy", { ...candidate, poolIds: [218] })).not.toBe(key);
+    expect(makeAiCandidateKey("auto", "live", "buy", { ...candidate, tokenOutContract: "fake.token" })).not.toBe(key);
+    expect(makeAiCandidateKey("auto", "live", "buy", candidate)).toBe(key);
   });
 });
 

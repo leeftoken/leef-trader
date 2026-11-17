@@ -62,6 +62,8 @@ import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal } from "@/lib/leef/journal";
 import { liveCapitalBlocked, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
 import { waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
+import { swapFlow } from "@/lib/market/swap-flow";
+import { buildBotVolumeContext } from "@/lib/market/volume-context";
 
 const KIND_VARIANT: Record<
   BotDecisionLog["kind"],
@@ -130,22 +132,50 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
   const flowGuardEnabled = useTerminal((s) => s.flowGuardEnabled);
   const setFlowGuardEnabled = useTerminal((s) => s.setFlowGuardEnabled);
+  const aiControl = useTerminal((s) => s.aiControl);
+  const previewNow = useNow(5_000);
+  const previewFlowStates = useMemo(
+    () => (flowGuardEnabled ? swapFlow.tracker.allStates(previewNow) : null),
+    [flowGuardEnabled, previewNow],
+  );
+  const previewRisk = useMemo(
+    () => ({ ...b.risk, maxQuoteAgeSec: Math.max(b.risk.maxQuoteAgeSec, syncSec + 15) }),
+    [b.risk, syncSec],
+  );
+  const previewVolumeContext = useMemo(
+    () =>
+      buildBotVolumeContext({
+        flowStates: previewFlowStates,
+        echoCostUsd: b.stats.echoCostUsd,
+        quoteWindowMs: previewRisk.maxQuoteAgeSec * 1000,
+      }),
+    [previewFlowStates, b.stats.echoCostUsd, previewRisk.maxQuoteAgeSec],
+  );
+  const previewRecentFailures = useMemo(
+    () =>
+      b.decisions.filter(
+        (d) =>
+          d.kind === "error" &&
+          isEconomicFailureReason(d.reason) &&
+          previewNow - Date.parse(d.t) < 600_000,
+      ).length,
+    [b.decisions, previewNow],
+  );
   /**
-   * Dry-run: what the bot would do on this book. Evaluated at the book's own
-   * fetch time (pure — no Date.now() in render) and memoized on the inputs so
-   * the engine doesn't re-run on every render.
+   * Dry-run: use wall-clock freshness and the same volume flow/budget context
+   * as the execution loop. Snapshot time made old books look fresh and omitted
+   * the two gates that most often explain why Volume Maker sits out.
    */
-  const snapMs = Date.parse(snap.fetchedAt);
   const preview = useMemo(
     () =>
       evaluateBot({
-        now: snapMs,
+        now: previewNow,
         snap,
         series: b.series,
         running: true,
         strategy: b.strategy,
         goals: b.goals,
-        risk: { ...b.risk, maxQuoteAgeSec: Math.max(b.risk.maxQuoteAgeSec, syncSec + 15) },
+        risk: previewRisk,
         position: b.position,
         gridAnchor: b.gridAnchor,
         balances,
@@ -153,12 +183,16 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         tradesThisHour: b.tradesThisHour,
         sessionRealizedUsd: b.stats.realizedUsd,
         sessionStartEquityUsd: b.stats.startEquityUsd,
+        recentFailures: previewRecentFailures,
+        flow: previewVolumeContext.flow,
+        flowStates: previewVolumeContext.flowStates,
+        echoCostUsd: previewVolumeContext.echoCostUsd,
         quote: b.quote,
         base: b.base,
         growthTargets: b.growthTargets,
         growthMode: b.growthMode,
       }),
-    [snap, snapMs, b, balances, syncSec],
+    [snap, previewNow, b, balances, previewRisk, previewVolumeContext, previewRecentFailures],
   );
 
   function onStart() {
@@ -628,6 +662,12 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
             ) : (
               <p className="mt-1 text-xs text-subtle">{preview.reason}</p>
             )}
+            {aiControl === "control" &&
+              (preview.kind === "buy" || preview.kind === "swap" || preview.kind === "arb") && (
+                <p className="mt-1 text-xs text-warn">
+                  Jev CONTROL is active: this candidate still needs a fresh approval for its exact route and size before execution.
+                </p>
+              )}
           </Card>
 
           {b.strategy === "growth" && <GrowthPnlCards snap={snap} />}

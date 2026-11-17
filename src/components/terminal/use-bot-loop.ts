@@ -57,7 +57,8 @@ import {
 } from "@/lib/leef/ai-executor";
 import { askJev, askJevDetailed } from "@/lib/leef/jev-client";
 import { refreshExecutionState } from "@/lib/market/execution-state";
-import { aggregateFlowRisk, swapFlow } from "@/lib/market/swap-flow";
+import { swapFlow } from "@/lib/market/swap-flow";
+import { buildBotVolumeContext } from "@/lib/market/volume-context";
 import { governTrade, portfolioState } from "@/lib/market/portfolio-governor";
 import { snapFreshAtMs, type LeefSnapshot, type SwapRoute } from "@/lib/leef/types";
 import { parseAssetAmount, type AlcorRouteQuote } from "@/lib/wallet/alcor-route";
@@ -697,9 +698,13 @@ async function runBotOnceInner(
   const mode: "paper" | "live" = live ? "live" : "paper";
   // Per-pool third-party flow states: feed BOTH the danger context and the
   // volume gate. Kill-switch off → null → volume intents fail closed.
-  const flowStates = useTerminal.getState().flowGuardEnabled
-    ? swapFlow.tracker.allStates(Date.now())
-    : null;
+  const volumeContext = buildBotVolumeContext({
+    flowStates: useTerminal.getState().flowGuardEnabled
+      ? swapFlow.tracker.allStates(Date.now())
+      : null,
+    echoCostUsd: b.stats.echoCostUsd,
+    quoteWindowMs: risk.maxQuoteAgeSec * 1000,
+  });
 
   let decision = evaluateBot({
     now: Date.now(),
@@ -731,12 +736,10 @@ async function runBotOnceInner(
     ).length,
     // E-1 swap flow → danger score, gated by the terminal-store kill-switch.
     // Risk context only: flow can raise danger, it can NEVER create an entry.
-    flow: flowStates
-      ? aggregateFlowRisk(flowStates, risk.maxQuoteAgeSec * 1000)
-      : null,
+    flow: volumeContext.flow,
     // Volume gate inputs: per-pool third-party flow + session echo budget.
-    flowStates,
-    echoCostUsd: b.stats.echoCostUsd,
+    flowStates: volumeContext.flowStates,
+    echoCostUsd: volumeContext.echoCostUsd,
     force: opts?.force ?? null,
   });
 

@@ -240,7 +240,7 @@ describe("Hyperion notification de-duplication", () => {
   });
 
   it("does not content-dedupe identical transfers when the provider omits ordinals", () => {
-    const { creator_action_ordinal: _ignored, ...withoutOrdinal } = duplicateNotification;
+    const withoutOrdinal = { act: duplicateNotification.act };
     const parsed = parseHyperionTransfers({
       executed: true,
       actions: [withoutOrdinal, { ...withoutOrdinal }],

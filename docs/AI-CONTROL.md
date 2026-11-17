@@ -21,6 +21,7 @@ The AI Helper is **not** a second per-trade approver. Making it approve every tr
 ## Jev candidate contract
 
 The application sends Jev:
+- Explicit execution mode (paper or live), bound into the candidate identity
 - Market regime, realized volatility, pool disagreement, danger score and quote age
 - Position size, entry mark, unrealized PnL, session results and configured risk limits
 - The deterministic candidate's token pair and contract identities, input amount, expected output/edge, impact, pool path and hop count
@@ -31,11 +32,11 @@ Jev can return only:
 - buy — accept the already-generated buy candidate
 - swap — accept the already-generated swap candidate
 
-For buy and swap, Jev may choose a quarter, half or full size bucket. This is a cap on the engine candidate, not an instruction to increase it. If the selected size is below the deterministic minimum trade, the candidate is rejected.
+For buy and swap, Jev may choose a quarter, half or full size bucket. This is a cap on the already-sized engine candidate input amount, not a percentage of the entire wallet and never an instruction to increase it. If the selected size is below the deterministic minimum trade, the candidate is rejected.
 
 Jev does not choose sell/stop actions. Protective sells and stops are engine-owned and bypass the Jev seam. Arbitrage and other unsupported candidate types remain deterministic.
 
-A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; the strategy, candidate kind, token contracts or route identity no longer match; or the weakest judgement is below the configured confidence floor. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
+A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; the strategy, paper/live mode, candidate kind, token contracts, input amount, expected output, edge, impact or route identity no longer match; an accepted approval is one-shot and cannot authorize another execution. or the weakest judgement is below the configured confidence floor. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
 
 ## AI Helper learning contract
 

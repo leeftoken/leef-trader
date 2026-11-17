@@ -105,8 +105,13 @@ The swap desk shows a caution (≥ 0.5) or warning (≥ 0.7) notice for the pair
 ## Jev execution seam (CONTROL)
 
 Separate from the analyst gateway: `POST /api/jev` asks TypeSafe Jev for
-typed judgments that `ai-executor.ts` turns into a proposal. Default is
-**OFF** (zero Jev calls).
+typed judgments that `ai-executor.ts` turns into a proposal. Noul values are
+probabilities of “yes”; their selected-side confidence is
+`max(noul, 1 - noul)`, while Choice confidence is passed through unchanged.
+The proposal uses the weakest relevant judgment and is bound to a versioned
+fingerprint of the exact candidate (strategy, contract-aware pair, input
+amount, USD notional, expected output/edge, impact, pools, hops and route).
+Default is **OFF** (zero Jev calls).
 
 - **SUGGEST** — proposals surface on the AI desk only.
 - **CONTROL** — a fresh proposal at/above confidence 0.75 becomes an

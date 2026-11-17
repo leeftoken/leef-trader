@@ -35,7 +35,9 @@ For buy and swap, Jev may choose a quarter, half or full size bucket. This is a 
 
 Jev does not choose sell/stop actions. Protective sells and stops are engine-owned and bypass the Jev seam. Arbitrage and other unsupported candidate types remain deterministic.
 
-A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; the strategy, candidate kind, token contracts or route identity no longer match; or the weakest judgement is below the configured confidence floor. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
+A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; or the strategy, candidate kind, token contracts, exact input amount, USD notional, expected output, expected net edge, price impact, pool path, hop count or route signature no longer match. The candidate fingerprint is versioned and includes all of those execution-relevant fields; route signatures alone are not sufficient because they are amount-independent.
+
+For a Noul answer, TypeSafe returns P(yes), not a centred confidence score. The confidence of the selected yes/no side is `max(noul, 1 - noul)`; `riskStress` must still be on the safe side (≤ 0.5) and `riskExecute` on the coherent/fresh side (≥ 0.5). Choice confidence is used as returned by TypeSafe. The proposal confidence is the weakest of the action, size and risk judgements. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
 
 ## AI Helper learning contract
 

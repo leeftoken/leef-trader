@@ -150,7 +150,7 @@ type BotState = {
   markTrade: (cooldownSec: number) => void;
   setPosition: (p: Position | null) => void;
   /** Idempotently persist an on-chain recovery and its resulting position. */
-  applyRecoveredExecution: (txid: string, position: Position | null) => void;
+  applyRecoveredExecution: (txid: string, position: Position | null, recoveredPnlUsd?: number) => void;
   setGridAnchor: (usd: number | null) => void;
   bumpPositionHigh: (usd: number) => void;
   recordResult: (pnlUsd: number, equityUsd: number, mode: "live" | "paper") => void;
@@ -312,16 +312,32 @@ export const useBot = create<BotState>()(
         });
       },
       setPosition: (position) => set({ position }),
-      applyRecoveredExecution: (txid, position) =>
-        set((s) =>
-          s.recoveredTxids.includes(txid)
-            ? {}
-            : {
-                position,
-                recoveredTxids: [...s.recoveredTxids, txid].slice(-100),
-                lastReason: `Recovered confirmed on-chain transaction ${txid.slice(0, 10)}…; position state reconciled.`,
-              },
-        ),
+      applyRecoveredExecution: (txid, position, recoveredPnlUsd) =>
+        set((s) => {
+          if (s.recoveredTxids.includes(txid)) return {};
+          const pnlKnown = Number.isFinite(recoveredPnlUsd);
+          const pnl = pnlKnown ? recoveredPnlUsd! : 0;
+          const stats = pnlKnown
+            ? {
+                ...s.stats,
+                closedTrades: (s.stats.closedTrades ?? 0) + 1,
+                wins: (s.stats.wins ?? 0) + (pnl > 0 ? 1 : 0),
+                realizedUsd: (s.stats.realizedUsd ?? 0) + pnl,
+                liveClosedTrades: (s.stats.liveClosedTrades ?? 0) + 1,
+                liveWins: (s.stats.liveWins ?? 0) + (pnl > 0 ? 1 : 0),
+                liveRealizedUsd: (s.stats.liveRealizedUsd ?? 0) + pnl,
+                lastPnlUsd: pnl,
+              }
+            : s.stats;
+          return {
+            position,
+            stats,
+            recoveredTxids: [...s.recoveredTxids, txid].slice(-100),
+            lastReason: pnlKnown
+              ? `Recovered confirmed on-chain transaction ${txid.slice(0, 10)}…; position and realized P&L reconciled.`
+              : `Recovered confirmed on-chain transaction ${txid.slice(0, 10)}…; position reconciled without estimating historical P&L.`,
+          };
+        }),
       setGridAnchor: (gridAnchor) => set({ gridAnchor }),
       bumpPositionHigh: (usd) =>
         set((s) =>

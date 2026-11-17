@@ -414,17 +414,31 @@ class MarketEngine {
             this.commit({ cycle: { ...this.state.cycle, balanceMs: Date.now() - tB } });
           });
           const tBot = Date.now();
-          // One scheduler lane: profit/strategy evaluates first. Maintenance
-          // only gets a turn after that decision settles and the shared
-          // capital lock is known idle.
-          await botOnSnapshot(snap);
-          rebalancerOnSnapshot(snap);
-          cycle.botMs = Date.now() - tBot;
-          this.commit({
-            cycle: { ...cycle, totalCycleMs: Date.now() - t0 },
-            signer: this.signerView(),
-            autoTrade: this.autoTradeView(),
-          });
+          // Do not hold the market-data scheduler behind venue quoting or a
+          // slow signer/network path. The bot owns its single-flight trade
+          // mutex; a newer market snapshot can land while this decision is
+          // still resolving. Maintenance still waits for strategy selection
+          // and then checks the shared capital lane.
+          void botOnSnapshot(snap)
+            .then(() => {
+              rebalancerOnSnapshot(snap);
+            })
+            .catch((err) => {
+              const reason = err instanceof Error ? err.message : "strategy evaluation failed";
+              useBot.getState().setLastReason(`Strategy evaluation error: ${reason}`);
+            })
+            .finally(() => {
+              const current = this.state.snapshot;
+              const stillCurrent =
+                current?.fetchedAt === snap.fetchedAt &&
+                current?.spotAt === snap.spotAt;
+              if (!stillCurrent) return;
+              this.commit({
+                cycle: { ...this.state.cycle, botMs: Date.now() - tBot },
+                signer: this.signerView(),
+                autoTrade: this.autoTradeView(),
+              });
+            });
         } else if (snap.source === "live" && !freshness.fresh && useBot.getState().running) {
           const ageLabel =
             freshness.ageMs == null || freshness.ageMs < 0

@@ -48,8 +48,8 @@ type TerminalState = {
    * Jev (System One) execution authority. Default OFF = zero Jev calls.
    * "suggest" = proposals surface on the AI desk only. "control" = a fresh
    * proposal at/above the confidence floor becomes an execution candidate
-   * through the unchanged risk gauntlet. Persisted; granting "control"
-   * requires the explicit confirm step (UI risk dialog → confirmed: true).
+   * through the unchanged risk gauntlet. Session-only: a full reload resets
+   * to OFF and requires the explicit confirm step again.
    */
   aiControl: "off" | "suggest" | "control";
   /** Latest Jev proposal for the AI desk (ephemeral — never persisted). */
@@ -175,17 +175,16 @@ export const useTerminal = create<TerminalState>()(
     }),
     {
       name: "leef-terminal-sync",
-      version: 2,
-      // v1 → v2: aiControl is new. The safe default is ALWAYS "off" — the
-      // legacy aiEnabled flag gated only the advisory analyst gateway and
-      // must never imply execution authority.
+      version: 3,
+      // v2 → v3: Jev CONTROL becomes session-only. Reset any previously
+      // persisted authority to OFF so a browser upgrade/reload cannot retain
+      // a prior live-trading authorization.
       migrate: (persisted) => ({ ...(persisted as object), aiControl: "off" }),
       partialize: (s) => ({
         syncSec: s.syncSec,
         aiGatewayUrl: s.aiGatewayUrl,
         swapMaxHops: s.swapMaxHops,
         aiEnabled: s.aiEnabled,
-        aiControl: s.aiControl,
         flowGuardEnabled: s.flowGuardEnabled,
         learningMode: s.learningMode,
         aiReviewEveryTrades: s.aiReviewEveryTrades,

@@ -35,6 +35,8 @@ type WalletState = {
   importOpen: boolean;
   setImportOpen: (v: boolean) => void;
   setAccount: (name: string) => void;
+  /** Switch execution mode without deleting the connected live wallet session. */
+  setMode: (mode: "paper" | "live") => void;
   setLiveSession: (p: { account: string; publicKey: string; permission: string }) => void;
   setWalletSession: (p: { account: string; permission: string; kind: WalletKind }) => void;
   setLiveBalances: (
@@ -78,6 +80,7 @@ export const useWallet = create<WalletState>()(
       importOpen: false,
       setImportOpen: (importOpen) => set({ importOpen }),
       setAccount: (account) => set({ account: account.trim().toLowerCase() }),
+      setMode: (mode) => set({ mode }),
       setLiveSession: ({ account, publicKey, permission }) =>
         set({
           mode: "live",

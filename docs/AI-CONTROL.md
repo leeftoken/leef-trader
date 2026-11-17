@@ -57,4 +57,6 @@ The Learning Governor validates proposals, shadow-tests them and controls promot
 4. Enable AI Helper CONTROLLED LEARNING after sufficient execution evidence exists.
 5. Review the Jev evidence, promoted artifacts, realised slippage, net edge, drawdown and missed-opportunity counterfactuals regularly.
 
+Jev CONTROL is session-only: it is not persisted, and a full browser reload returns it to OFF. Any previously persisted CONTROL setting is reset to OFF by the v3 store migration. The AI Helper learning mode may remain configured across reloads because it only submits bounded proposals to the deterministic governor.
+
 Never interpret the two AI controls as permission to bypass deterministic limits or to change live wallet authority. Production deployment and key/permission changes are separate release decisions.

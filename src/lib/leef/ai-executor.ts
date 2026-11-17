@@ -428,7 +428,7 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
       criteria: {
         quarter: "25% — cautious clip.",
         half: "50% — moderate clip.",
-        full: "100% — full deployable amount, still subject to deterministic limits.",
+        full: "100% — the entire already-sized candidate input amount, still subject to deterministic limits.",
       },
     };
   }
@@ -549,8 +549,8 @@ export function parseAiProposal(
       !candidate.tokenInContract ||
       !candidate.tokenOut ||
       !candidate.tokenOutContract ||
-      candidate.tokenIn === candidate.tokenOut ||
-      candidate.tokenInContract === candidate.tokenOutContract
+      (candidate.tokenIn.toUpperCase() === candidate.tokenOut.toUpperCase() &&
+        candidate.tokenInContract.toLowerCase() === candidate.tokenOutContract.toLowerCase())
     ) return null;
     params.tokenIn = candidate.tokenIn;
     params.tokenOut = candidate.tokenOut;

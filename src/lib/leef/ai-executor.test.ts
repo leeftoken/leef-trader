@@ -94,6 +94,7 @@ const context: AiProposalContext = {
     expectedOut: 1_000_000,
     expectedNetEdgePct: 1.2,
     priceImpactPct: 0.2,
+    liquidityUsd: 900,
     poolIds: [217],
     hops: 1,
   },
@@ -175,6 +176,7 @@ describe("buildAiCandidateKey", () => {
     expect(buildAiCandidateKey("auto", "buy", { ...details, amountIn: 11 }, "direct:217")).not.toBe(base);
     expect(buildAiCandidateKey("auto", "buy", { ...details, expectedOut: 999_999 }, "direct:217")).not.toBe(base);
     expect(buildAiCandidateKey("auto", "buy", { ...details, expectedNetEdgePct: 0.4 }, "direct:217")).not.toBe(base);
+    expect(buildAiCandidateKey("auto", "buy", { ...details, liquidityUsd: 800 }, "direct:217")).not.toBe(base);
     expect(buildAiCandidateKey("auto", "buy", { ...details, tokenOutContract: "clone.token" }, "direct:217")).not.toBe(base);
     expect(buildAiCandidateKey("auto", "buy", details, "direct:218")).not.toBe(base);
     expect(buildAiCandidateKey("grid", "buy", details, "direct:217")).not.toBe(base);

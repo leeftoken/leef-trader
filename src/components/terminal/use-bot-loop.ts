@@ -705,7 +705,7 @@ async function runBotOnceInner(
     mode,
     candidateKind,
     candidateDetails,
-  )
+  );
   // Jev judges the existing strategy/token-pair candidate. It cannot invent
   // another trade type or token pair; route selection remains engine-owned.
   maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
@@ -826,7 +826,7 @@ async function runBotOnceInner(
         AI_PROPOSAL_MAX_AGE_MS,
       )
         ? p
-        : null
+        : null;
     const aiHold = (reason: string): Decision => {
       b.pushDecision({ kind: "hold", mode, reason, priceUsd: snap.leefUsd });
       b.setLastReason(reason);

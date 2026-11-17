@@ -487,7 +487,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busyForce || !b.position || hasRecoveryLock}
+                disabled={busyForce || !b.position || (liveReady && hasRecoveryLock)}
                 onClick={() => onForce("sell")}
               >
                 {confirmForce === "sell" ? "Confirm live sell" : "Sell position now"}

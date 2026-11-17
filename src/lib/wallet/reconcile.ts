@@ -64,6 +64,8 @@ export function parseHyperionTransfers(
   // genuinely distinct identical transfers in one transaction are valid.
   const seenCreatorOrdinals = new Set<string>();
   for (const row of root.actions as HyperionAction[]) {
+    const act = row?.act;
+    if (!act || act.name !== "transfer") continue;
     const ordinal = row?.creator_action_ordinal;
     if (
       (typeof ordinal === "string" && ordinal.length > 0) ||
@@ -73,8 +75,6 @@ export function parseHyperionTransfers(
       if (seenCreatorOrdinals.has(key)) continue;
       seenCreatorOrdinals.add(key);
     }
-    const act = row?.act;
-    if (!act || act.name !== "transfer") continue;
     const contract = typeof act.account === "string" ? act.account : "";
     const data = (act.data ?? {}) as Record<string, unknown>;
     const from = typeof data.from === "string" ? data.from : "";

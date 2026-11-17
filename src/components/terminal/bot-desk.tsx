@@ -62,7 +62,7 @@ import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal } from "@/lib/leef/journal";
 import { liveCapitalBlocked, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
 import { waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
-import { swapFlow, type PoolFlowState } from "@/lib/market/swap-flow";
+import { swapFlow } from "@/lib/market/swap-flow";
 import { buildBotVolumeContext } from "@/lib/market/volume-context";
 
 const KIND_VARIANT: Record<
@@ -136,7 +136,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const previewNow = useNow(5_000);
   const previewFlowStates = useMemo(
     () => (flowGuardEnabled ? swapFlow.tracker.allStates(previewNow) : null),
-    [flowGuardEnabled, previewNow, snap],
+    [flowGuardEnabled, previewNow],
   );
   const previewRisk = useMemo(
     () => ({ ...b.risk, maxQuoteAgeSec: Math.max(b.risk.maxQuoteAgeSec, syncSec + 15) }),

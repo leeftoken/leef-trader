@@ -60,7 +60,7 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
-import { liveCapitalBlocked, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 import { assessUnknownExecution } from "@/lib/wallet/recovery";
 import { metaOf } from "@/lib/wallet/tokens";
@@ -174,7 +174,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
         return;
       }
-      markFailed(); // clear the guard only after state + journal reconciliation
+      markConfirmed(); // clear the guard only after state + journal reconciliation
       setRecoveryNotice("Recovered from confirmed on-chain transfers. Bot position state and the evidence journal are reconciled; the live capital lock is released. Historical P&L was not estimated.");
     } catch (error) {
       setRecoveryNotice(error instanceof Error ? error.message : "Recovery inspection failed. The live capital lock remains in place.");

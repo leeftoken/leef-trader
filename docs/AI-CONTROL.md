@@ -23,7 +23,7 @@ The AI Helper is **not** a second per-trade approver. Making it approve every tr
 The application sends Jev:
 - Market regime, realized volatility, pool disagreement, danger score and quote age
 - Position size, entry mark, unrealized PnL, session results and configured risk limits
-- The deterministic candidate's token pair and contract identities, input amount, expected output/edge, impact, pool path and hop count
+- The deterministic candidate's token pair and contract identities, input amount, expected output/edge, impact, pool liquidity, pool path and hop count
 - A source snapshot timestamp, candidate identity, request time and returned model identifier
 
 Jev can return only:
@@ -35,7 +35,9 @@ For buy and swap, Jev may choose a quarter, half or full size bucket. This is a 
 
 Jev does not choose sell/stop actions. Protective sells and stops are engine-owned and bypass the Jev seam. Arbitrage and other unsupported candidate types remain deterministic.
 
-A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; the strategy, candidate kind, token contracts or route identity no longer match; or the weakest judgement is below the configured confidence floor. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
+A proposal is unusable if its source snapshot is missing, future-dated or too old; the response is delayed; the confidence/Noul values are outside 0–1; or the strategy, candidate kind, token contracts, exact input amount, USD notional, expected output, expected net edge, price impact, pool path, hop count or route signature no longer match. The candidate fingerprint is versioned and includes all of those execution-relevant fields; route signatures alone are not sufficient because they are amount-independent.
+
+For a Noul answer, TypeSafe returns P(yes), not a centred confidence score. The confidence of the selected yes/no side is `max(noul, 1 - noul)`; `riskStress` must still be on the safe side (≤ 0.5) and `riskExecute` on the coherent/fresh side (≥ 0.5). Choice confidence is used as returned by TypeSafe. The proposal confidence is the weakest of the action, size and risk judgements. The 75% floor is a software threshold, **not proof of 75% real-world accuracy**. Calibration must be measured from outcomes.
 
 ## AI Helper learning contract
 
@@ -54,5 +56,7 @@ The Learning Governor validates proposals, shadow-tests them and controls promot
 3. Enable Jev CONTROL only when the candidate, snapshot and confidence checks are behaving as expected.
 4. Enable AI Helper CONTROLLED LEARNING after sufficient execution evidence exists.
 5. Review the Jev evidence, promoted artifacts, realised slippage, net edge, drawdown and missed-opportunity counterfactuals regularly.
+
+Jev CONTROL is session-only: it is not persisted, and a full browser reload returns it to OFF. Any previously persisted CONTROL setting is reset to OFF by the v3 store migration. The AI Helper learning mode may remain configured across reloads because it only submits bounded proposals to the deterministic governor.
 
 Never interpret the two AI controls as permission to bypass deterministic limits or to change live wallet authority. Production deployment and key/permission changes are separate release decisions.

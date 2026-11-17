@@ -304,6 +304,8 @@ async function executeAnalystTask(
     const result = await aiTask(task, data, { url: aiGatewayUrl });
     journal({
       kind: "ai",
+      aiSource: "helper",
+      aiModel: result.model,
       reason: `${task}: ok · ${result.raw.slice(0, 180)}`,
       latencyMs: Date.now() - t0,
     });
@@ -329,7 +331,7 @@ async function executeAnalystTask(
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI call failed";
     const failure = err instanceof AiError ? err.failure : undefined;
-    journal({ kind: "ai", reason: `${task}: failed · ${msg}`, latencyMs: Date.now() - t0 });
+    journal({ kind: "ai", aiSource: "helper", reason: `${task}: failed · ${msg}`, latencyMs: Date.now() - t0 });
     return { ok: false, at: Date.now(), error: msg, failure };
   }
 }

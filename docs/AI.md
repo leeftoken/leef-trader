@@ -105,8 +105,13 @@ The swap desk shows a caution (≥ 0.5) or warning (≥ 0.7) notice for the pair
 ## Jev execution seam (CONTROL)
 
 Separate from the analyst gateway: `POST /api/jev` asks TypeSafe Jev for
-typed judgments that `ai-executor.ts` turns into a proposal. Default is
-**OFF** (zero Jev calls).
+typed judgments that `ai-executor.ts` turns into a proposal. Noul values are
+probabilities of “yes”; their selected-side confidence is
+`max(noul, 1 - noul)`, while Choice confidence is passed through unchanged.
+The proposal uses the weakest relevant judgment and is bound to a versioned
+fingerprint of the exact candidate (strategy, contract-aware pair, input
+amount, USD notional, expected output/edge, impact, pool liquidity, pools, hops and route).
+Default is **OFF** (zero Jev calls).
 
 - **SUGGEST** — proposals surface on the AI desk only.
 - **CONTROL** — a fresh proposal at/above confidence 0.75 becomes an
@@ -119,7 +124,9 @@ typed judgments that `ai-executor.ts` turns into a proposal. Default is
 - Jev cannot suppress a protective engine exit. Fail-closed: any non-OK
   `/api/jev` response is treated as unavailable.
 
-CONTROL is persisted in `leef-terminal-sync` (session-only persistence is a
-tracked follow-up). `/api/jev` is rate-limited per IP per warm instance;
+CONTROL is session-only and is deliberately excluded from
+`leef-terminal-sync`; a full browser reload resets Jev to OFF and requires
+the explicit confirmation again. The store migration also resets any older
+persisted CONTROL value to OFF. `/api/jev` is rate-limited per IP per warm instance;
 set `TRADER_API_TOKEN` to require a bearer (the public web app currently
 calls it without one).

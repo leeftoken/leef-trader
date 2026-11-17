@@ -3,6 +3,7 @@ import {
   AI_EXEC_CONFIDENCE_MIN,
   AI_QID,
   buildAiQuestions,
+  buildAiCandidateKey,
   isAiProposalFresh,
   parseAiProposal,
   type AiProposalContext,
@@ -93,6 +94,7 @@ const context: AiProposalContext = {
     expectedOut: 1_000_000,
     expectedNetEdgePct: 1.2,
     priceImpactPct: 0.2,
+    liquidityUsd: 900,
     poolIds: [217],
     hops: 1,
   },
@@ -122,7 +124,10 @@ const swapContext: AiProposalContext = {
 describe("buildAiQuestions", () => {
   it("offers only the action types allowed for the exact deterministic candidate", () => {
     const q = buildAiQuestions(summary());
-    const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
+    const actionQuestion = q[AI_QID.action] as { instructions: string; criteria: Record<string, unknown> };
+    expect(actionQuestion.instructions).toContain("USD notional");
+    expect(actionQuestion.instructions).toContain("pool liquidity");
+    const criteria = actionQuestion.criteria;
     expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
     expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
     expect(q[AI_QID.riskStress]?.type).toBe("noul");
@@ -151,6 +156,45 @@ describe("buildAiQuestions", () => {
     expect(s.positionUnrealizedPct).toBe(6.25);
     expect(s.tokenUniverse).toContainEqual({ symbol: "LEEF", contract: "leefmaincorp" });
     expect(s.candidate.expectedNetEdgePct).toBe(1.2);
+  });
+});
+
+describe("buildAiCandidateKey", () => {
+  const details = {
+    tokenIn: "WAX",
+    tokenInContract: "eosio.token",
+    tokenOut: "LEEF",
+    tokenOutContract: "leefmaincorp",
+    amountIn: 10,
+    amountUsd: 0.047,
+    expectedOut: 1_000_000,
+    expectedNetEdgePct: 1.2,
+    priceImpactPct: 0.2,
+    poolIds: [217],
+    hops: 1,
+  };
+
+  it("binds approval identity to exact size, economics, contracts, route and strategy", () => {
+    const base = buildAiCandidateKey("auto", "buy", details, "direct:217");
+    expect(buildAiCandidateKey("auto", "buy", { ...details, amountIn: 11 }, "direct:217")).not.toBe(base);
+    expect(buildAiCandidateKey("auto", "buy", { ...details, expectedOut: 999_999 }, "direct:217")).not.toBe(base);
+    expect(buildAiCandidateKey("auto", "buy", { ...details, expectedNetEdgePct: 0.4 }, "direct:217")).not.toBe(base);
+    expect(buildAiCandidateKey("auto", "buy", { ...details, liquidityUsd: 800 }, "direct:217")).not.toBe(base);
+    expect(buildAiCandidateKey("auto", "buy", { ...details, tokenOutContract: "clone.token" }, "direct:217")).not.toBe(base);
+    expect(buildAiCandidateKey("auto", "buy", details, "direct:218")).not.toBe(base);
+    expect(buildAiCandidateKey("grid", "buy", details, "direct:217")).not.toBe(base);
+  });
+
+  it("normalizes token identity while preserving exact numeric candidate values", () => {
+    const base = buildAiCandidateKey("auto", "buy", details, "direct:217");
+    const normalized = buildAiCandidateKey("auto", "buy", {
+      ...details,
+      tokenIn: "wax",
+      tokenInContract: "EOSIO.TOKEN",
+      tokenOut: "leef",
+      tokenOutContract: "LEEFMAINCORP",
+    }, "direct:217");
+    expect(normalized).toBe(base);
   });
 });
 
@@ -206,6 +250,18 @@ describe("parseAiProposal", () => {
       ...answers(),
       [AI_QID.riskExecute]: { type: "noul", noul: 1.1 },
     }, context)).toBeNull();
+  });
+
+  it("uses TypeSafe Noul probability confidence without the incorrect doubled-distance conversion", () => {
+    const p = parseAiProposal(answers({
+      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.98 },
+      [AI_QID.sizeBucket]: { type: "choice", choice: "half", confidence: 0.98 },
+      [AI_QID.riskStress]: { type: "noul", noul: 0.2 },
+      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
+    }), context);
+    expect(p).not.toBeNull();
+    expect(p!.confidence).toBeCloseTo(0.8, 10);
+    expect(p!.weakest).toBe(AI_QID.riskStress);
   });
 
   it("rejects candidates under acute market stress or with unsafe data", () => {

@@ -500,6 +500,11 @@ let rateLimitedUntil = 0;
 /** Evaluation mutex — paper fills and live quotes must not overlap. */
 let cycleInFlight = false;
 
+/** Read-only guard for the market scheduler's maintenance lane. */
+export function botCycleInFlight(): boolean {
+  return cycleInFlight;
+}
+
 /** Read-only follow-up for an ambiguous bot transaction. */
 function pollUnknown(txid: string): void {
   void (async () => {

@@ -4,6 +4,8 @@ import {
   AI_QID,
   buildAiQuestions,
   isAiProposalFresh,
+  isAiProposalForCandidate,
+  makeAiCandidateKey,
   parseAiProposal,
   type AiProposalContext,
   type AiSnapshotSummary,
@@ -79,6 +81,7 @@ const context: AiProposalContext = {
   requestedAt: 100_000,
   receivedAt: 105_000,
   model: "jev-latest",
+  executionMode: "paper",
   candidateKind: "buy",
   candidateKey: "auto:buy:WAX@eosio.token:LEEF@leefmaincorp:direct:217",
   candidate: {
@@ -100,6 +103,7 @@ const context: AiProposalContext = {
 };
 const swapContext: AiProposalContext = {
   ...context,
+  executionMode: "paper",
   candidateKind: "swap",
   candidateKey: "auto:swap:WAX@eosio.token:LEEF@leefmaincorp:direct:217",
   candidate: {
@@ -251,6 +255,54 @@ describe("parseAiProposal", () => {
 
   it("exposes the documented execution gate constant", () => {
     expect(AI_EXEC_CONFIDENCE_MIN).toBe(0.75);
+  });
+});
+
+
+describe("candidate identity and execution-mode binding", () => {
+  const details = {
+    tokenIn: "WAX",
+    tokenInContract: "eosio.token",
+    tokenOut: "LEEF",
+    tokenOutContract: "leefmaincorp",
+    amountIn: 10,
+    amountUsd: 0.047,
+    expectedOut: 1_000_000,
+    expectedNetEdgePct: 1.2,
+    priceImpactPct: 0.2,
+    poolIds: [217],
+    hops: 1,
+  };
+
+  it("binds the candidate identity to amount, output, edge, impact, route and execution mode", () => {
+    const base = makeAiCandidateKey("auto", "paper", "buy", details);
+    expect(makeAiCandidateKey("auto", "live", "buy", details)).not.toBe(base);
+    expect(makeAiCandidateKey("auto", "paper", "buy", { ...details, amountIn: 9.9 })).not.toBe(base);
+    expect(makeAiCandidateKey("auto", "paper", "buy", { ...details, expectedOut: 999_000 })).not.toBe(base);
+    expect(makeAiCandidateKey("auto", "paper", "buy", { ...details, expectedNetEdgePct: 0.7 })).not.toBe(base);
+    expect(makeAiCandidateKey("auto", "paper", "buy", { ...details, priceImpactPct: 0.9 })).not.toBe(base);
+    expect(makeAiCandidateKey("auto", "paper", "buy", { ...details, poolIds: [217, 218] })).not.toBe(base);
+    expect(makeAiCandidateKey("grid", "paper", "buy", details)).not.toBe(base);
+  });
+
+  it("refuses to reuse a paper judgement for live trading", () => {
+    const proposal = parseAiProposal(answers(), context)!;
+    expect(isAiProposalForCandidate(
+      proposal, "1970-01-01T00:01:45.000Z", 106_000,
+      "buy", context.candidateKey, "paper",
+    )).toBe(true);
+    expect(isAiProposalForCandidate(
+      proposal, "1970-01-01T00:01:45.000Z", 106_000,
+      "buy", context.candidateKey, "live",
+    )).toBe(false);
+  });
+
+  it("requires complete code-owned token identity and sizing for buys as well as swaps", () => {
+    const incomplete = {
+      ...context,
+      candidate: { kind: "buy" as const, key: context.candidateKey },
+    };
+    expect(parseAiProposal(answers(), incomplete)).toBeNull();
   });
 });
 

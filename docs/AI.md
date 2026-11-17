@@ -124,7 +124,9 @@ Default is **OFF** (zero Jev calls).
 - Jev cannot suppress a protective engine exit. Fail-closed: any non-OK
   `/api/jev` response is treated as unavailable.
 
-CONTROL is persisted in `leef-terminal-sync` (session-only persistence is a
-tracked follow-up). `/api/jev` is rate-limited per IP per warm instance;
+CONTROL is session-only and is deliberately excluded from
+`leef-terminal-sync`; a full browser reload resets Jev to OFF and requires
+the explicit confirmation again. The store migration also resets any older
+persisted CONTROL value to OFF. `/api/jev` is rate-limited per IP per warm instance;
 set `TRADER_API_TOKEN` to require a bearer (the public web app currently
 calls it without one).

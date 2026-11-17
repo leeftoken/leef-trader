@@ -316,6 +316,21 @@ describe("free pool-state checkpoints", () => {
   });
 });
 
+describe("inactive pool cleanup", () => {
+  it("prunes tracker and checkpoint state when the snapshot removes a pool", () => {
+    const service = new SwapFlowService({ call: async () => ({ actions: [] }) });
+    const pool = leefPool();
+    const checkpoint = checkpointForLeefPool(event(7), pool)!;
+    service.tracker.note(event(7), "A");
+    service.noteCheckpoints([checkpoint]);
+
+    service.track([], { pools: [], aux: [] });
+
+    expect(service.tracker.allStates(T0)).toHaveLength(0);
+    expect(service.stats().checkpoints).toBe(0);
+  });
+});
+
 describe("poller discipline", () => {
   it("backs off exponentially to 60s", () => {
     expect(flowBackoffMs(0)).toBe(0);

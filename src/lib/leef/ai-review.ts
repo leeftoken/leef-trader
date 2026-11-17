@@ -24,13 +24,13 @@ import {
   SIZE_BUCKET_LABELS,
 } from "./learning";
 import {
-  bootLearning,
+  bootLearningFromJournal,
   getArtifacts,
   getProfiles,
   injectArtifacts,
   refreshProposals,
 } from "./learning-store";
-import { aggregateEntries, journal, journalAll, type JournalEntry } from "./journal";
+import { aggregateEntries, journal, type JournalEntry } from "./journal";
 
 /**
  * Compact, structured Jev evidence for the strategic AI Helper. Confidence is
@@ -83,8 +83,7 @@ export function buildJevEvidence(entries: JournalEntry[]): Record<string, unknow
 
 /** The evidence_review payload — shared by the desk button and auto-review. */
 export async function evidenceReviewContext(): Promise<Record<string, unknown>> {
-  const entries = await journalAll();
-  await bootLearning(entries);
+  const entries = await bootLearningFromJournal();
   refreshProposals();
   const poolProfiles = Object.values(getProfiles())
     .filter((p) => p.kind === "pool")

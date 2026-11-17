@@ -671,6 +671,7 @@ async function runBotOnceInner(
           expectedOut: decision.route.amountOut,
           expectedNetEdgePct: decision.edge?.netEdgePct,
           priceImpactPct: decision.route.priceImpact * 100,
+          liquidityUsd: decision.route.tvlUsd,
           poolIds: decision.route.poolIds,
           hops: decision.route.legs.length,
         }
@@ -683,7 +684,9 @@ async function runBotOnceInner(
             amountIn: decision.amountIn,
             amountUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, snap) || 0),
             expectedOut: decision.route.amountOut,
+            expectedNetEdgePct: decision.opportunity?.expectedNetEdgePct,
             priceImpactPct: decision.route.priceImpact * 100,
+            liquidityUsd: decision.route.tvlUsd,
             poolIds: decision.route.poolIds,
             hops: decision.route.legs.length,
           }

@@ -497,7 +497,7 @@ export function parseAiProposal(
     context.candidateKind !== "preview" &&
     action !== context.candidateKind
   ) return null;
-  if (context && action !== "hold") {
+  if (context && action !== "hold" && context.candidateKind !== "preview") {
     const c = context.candidate;
     if (
       !c.tokenIn ||

@@ -190,6 +190,8 @@ export async function maybeAutoReview(opts: {
     lastNote = `ok · ${r.added} proposed · ${r.rejected} rejected`;
     journal({
       kind: "ai",
+      aiSource: "helper",
+      aiModel: res.model,
       reason: `auto evidence_review (every ${every} trades): ${lastNote} · ${res.raw.slice(0, 120)}`,
       latencyMs: res.latencyMs,
     });
@@ -197,7 +199,7 @@ export async function maybeAutoReview(opts: {
     // Failure is a journal line, never an incident. Skip to the next cadence.
     tradesAtLastReview = opts.trades;
     lastNote = err instanceof Error ? err.message : "failed";
-    journal({ kind: "ai", reason: `auto evidence_review: failed · ${lastNote}` });
+    journal({ kind: "ai", aiSource: "helper", reason: `auto evidence_review: failed · ${lastNote}` });
   } finally {
     reviewInFlight = false;
   }

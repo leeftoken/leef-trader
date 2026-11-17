@@ -432,6 +432,7 @@ export function buildAiCandidateKey(
     token(candidate.tokenInContract),
     token(candidate.tokenOut, true),
     token(candidate.tokenOutContract),
+    candidate.arbKind ?? null,
     finite(candidate.amountIn),
     finite(candidate.amountUsd),
     finite(candidate.expectedOut),

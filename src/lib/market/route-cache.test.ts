@@ -136,7 +136,7 @@ describe("RouteCache dependency invalidation", () => {
       poolVersions: { 1: cache.versionOf(1) },
     });
     // Some random NFT-collection pool flips — nothing to do with our route.
-    const changed = cache.notePools([mkPool(2, 9_000, 90_000_000)]);
+    const changed = cache.notePools([p1, mkPool(2, 9_000, 90_000_000)]);
     expect(changed).toEqual([2]);
     expect(cache.isFresh(cache.get("leef-wax")!)).toBe(true);
   });

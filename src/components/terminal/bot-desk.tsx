@@ -87,6 +87,8 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
     return () => releaseWakeLock();
   }, [b.running]);
   const mode = useWallet((s) => s.mode);
+  const setWalletMode = useWallet((s) => s.setMode);
+  const paperFaucet = useWallet((s) => s.paperFaucet);
   const account = useWallet((s) => s.account);
   const authType = useWallet((s) => s.authType);
   const setImportOpen = useWallet((s) => s.setImportOpen);
@@ -232,6 +234,40 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                   {unresolvedTxid}
                 </p>
               )}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {mode === "live" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setWalletMode("paper");
+                      paperFaucet();
+                      setConfirmLive(false);
+                      setConfirmForce(null);
+                    }}
+                  >
+                    Switch to paper mode · test Jev safely
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setWalletMode("live");
+                      setConfirmLive(false);
+                    }}
+                  >
+                    Return to live wallet mode
+                  </Button>
+                )}
+                <span className="text-[11px] text-muted-foreground">
+                  {mode === "live"
+                    ? "Paper mode uses simulated balances and the live market book. Your live wallet session is preserved; the unresolved live lock remains in place."
+                    : "Paper mode cannot sign or broadcast. Jev can still evaluate live-market candidates; the unresolved live transaction remains locked."}
+                </span>
+              </div>
             </div>
             {unresolvedTxid && (
               <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
@@ -403,7 +439,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 variant="leef"
                 className="h-12 w-full text-base"
                 onClick={onStart}
-                disabled={!liveBook || hasRecoveryLock}
+                disabled={!liveBook || (liveReady && hasRecoveryLock)}
               >
                 <CirclePlay className="size-4" />
                 {confirmLive
@@ -443,7 +479,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busyForce || !liveBook || hasRecoveryLock}
+                disabled={busyForce || !liveBook || (liveReady && hasRecoveryLock)}
                 onClick={() => onForce("buy")}
               >
                 {confirmForce === "buy" ? "Confirm live buy" : "Buy a clip now"}
@@ -451,7 +487,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busyForce || !b.position || hasRecoveryLock}
+                disabled={busyForce || !b.position || (liveReady && hasRecoveryLock)}
                 onClick={() => onForce("sell")}
               >
                 {confirmForce === "sell" ? "Confirm live sell" : "Sell position now"}

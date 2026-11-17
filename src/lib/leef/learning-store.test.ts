@@ -6,6 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { onJournalEntry, type JournalEntry } from "./journal";
 import {
+  bootLearningFromJournal,
+  learningBooted,
   evaluateDueCounterfactuals,
   pendingCounterfactualCount,
   registerCounterfactual,
@@ -51,6 +53,18 @@ function mkSnap(priceWax: number, tapePool217: number[], now: number): LeefSnaps
     ],
   };
 }
+
+describe("learning startup", () => {
+  it("shares one journal boot read across concurrent snapshot arrivals", async () => {
+    const first = bootLearningFromJournal();
+    const second = bootLearningFromJournal();
+
+    expect(second).toBe(first);
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toBe(b);
+    expect(learningBooted()).toBe(true);
+  });
+});
 
 describe("counterfactual evaluation", () => {
   it("judges a veto with the real tape when fills printed in the window", () => {

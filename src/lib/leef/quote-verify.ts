@@ -16,6 +16,7 @@
  * the real freshness guarantee (and it is enforced on every executable leg).
  */
 import { quoteConstantProduct } from "./amm";
+import { TtlCache } from "@/lib/market/ttl-cache";
 import { defiboxMemo, neftyMemo, refreshVenuePair, tacoMemo } from "./venue-adapters";
 import {
   dustSafeMinOut,
@@ -97,7 +98,7 @@ export function combineGuaranteedOut(
 }
 
 const QUOTE_TTL_MS = 1_200;
-const quoteCache = new Map<string, { at: number; quote: AlcorRouteQuote }>();
+const quoteCache = new TtlCache<string, AlcorRouteQuote>(128, QUOTE_TTL_MS);
 const inflightQuotes = new Map<string, Promise<AlcorRouteQuote>>();
 
 function alcorKey(opts: {
@@ -125,12 +126,12 @@ export async function fetchAlcorRouteCached(opts: {
   const maxHops = opts.maxHops ?? 10;
   const key = alcorKey({ ...opts, maxHops });
   const hit = quoteCache.get(key);
-  if (hit && Date.now() - hit.at < QUOTE_TTL_MS) return hit.quote;
+  if (hit) return hit;
   const pending = inflightQuotes.get(key);
   if (pending) return pending;
   const p = fetchAlcorRoute({ ...opts, maxHops, timeoutMs: 5_000 })
     .then((q) => {
-      quoteCache.set(key, { at: Date.now(), quote: q });
+      quoteCache.set(key, q);
       return q;
     })
     .finally(() => inflightQuotes.delete(key));

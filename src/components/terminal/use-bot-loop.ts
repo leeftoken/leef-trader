@@ -24,13 +24,12 @@ import {
 } from "@/lib/leef/route-optimizer";
 import {
   journal,
-  journalAll,
   journalFixture,
   setJournalCycleId,
   type MarketFixture,
 } from "@/lib/leef/journal";
 import {
-  bootLearning,
+  bootLearningFromJournal,
   evaluateDueCounterfactuals,
   learnedSizeCeilingMult,
   learnedSlippageOverride,
@@ -2425,7 +2424,7 @@ export async function botOnSnapshot(snap: LeefSnapshot): Promise<void> {
     // Learning drivers run even when the bot is stopped: counterfactuals and
     // self-impact observations must resolve past a mid-window stop.
     if (!learningBooted()) {
-      void journalAll().then((entries) => bootLearning(entries));
+      void bootLearningFromJournal();
     }
     evaluateDueCounterfactuals(snap);
     measureDueSelfImpact(snap);

@@ -52,6 +52,56 @@ function mkRoute(id: string, out = 99): SwapRoute {
   };
 }
 
+describe("route cache auxiliary dependencies", () => {
+  it("invalidates routes when an auxiliary WAX conversion pool changes", () => {
+    const cache = new RouteCache();
+    const aux = {
+      id: 2_001,
+      fee: 3000,
+      feePct: 0.3,
+      tokenA: { symbol: "WAX", contract: "eosio.token", decimals: 8, quantity: 10 },
+      tokenB: { symbol: "USDT", contract: "tethertether", decimals: 4, quantity: 20 },
+      priceA: 1,
+      priceB: 1,
+      sqrtPriceX64: "1",
+      liquidity: "1000",
+      tvlUsd: 1_000,
+      volume24Usd: 100,
+    };
+    cache.notePools([aux]);
+    cache.put({
+      key: "wax-usdt",
+      inputsKey: "10",
+      routes: [mkRoute("wax-usdt")],
+      poolIds: [aux.id],
+      poolVersions: { [aux.id]: cache.versionOf(aux.id) },
+    });
+
+    const changed = cache.notePools([{ ...aux, priceA: 1.02 }]);
+    expect(changed).toEqual([aux.id]);
+    expect(cache.isFresh(cache.get("wax-usdt")!)).toBe(false);
+  });
+
+  it("drops cached dependencies when a pool leaves the live snapshot", () => {
+    const cache = new RouteCache();
+    const p1 = mkPool(1, 50_000, 500_000_000);
+    const p2 = mkPool(2, 8_000, 90_000_000);
+    cache.notePools([p1, p2]);
+    cache.put({
+      key: "removed-pool-route",
+      inputsKey: "10",
+      routes: [mkRoute("stale")],
+      poolIds: [2],
+      poolVersions: { 2: cache.versionOf(2) },
+    });
+
+    cache.notePools([p1]);
+
+    expect(cache.get("removed-pool-route")).toBeNull();
+    expect(cache.stats().trackedPools).toBe(1);
+  });
+});
+
 describe("RouteCache dependency invalidation", () => {
   it("a pool the route depends on changing invalidates it", () => {
     const cache = new RouteCache();
@@ -123,6 +173,32 @@ describe("RouteCache dependency invalidation", () => {
     expect(cache.get("b")).toBeNull();
     const stats = cache.stats();
     expect(stats.fresh).toBe(0);
+  });
+});
+
+describe("routesCached dependency identity", () => {
+  it("recomputes when a pool disappears from the dependency set", () => {
+    routeCache.clear();
+    const p1 = mkPool(1, 50_000, 500_000_000);
+    const p2 = mkPool(2, 8_000, 90_000_000);
+    routeCache.notePools([p1, p2]);
+    let computes = 0;
+    const compute = () => {
+      computes += 1;
+      return [mkRoute(`route-${computes}`)];
+    };
+
+    routesCached(compute, { key: "dependency-set", poolIds: [1, 2], inputsKey: "same" });
+    // The surviving pool's version has not changed, but pool 2 is no longer
+    // part of the live route graph. A route that may depend on it is invalid.
+    const afterRemoval = routesCached(compute, {
+      key: "dependency-set",
+      poolIds: [1],
+      inputsKey: "same",
+    });
+
+    expect(computes).toBe(2);
+    expect(afterRemoval[0]!.id).toBe("route-2");
   });
 });
 

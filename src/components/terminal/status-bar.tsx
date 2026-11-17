@@ -180,7 +180,7 @@ export function StatusBar({
           </span>
           <span className="font-mono" title={`Auto trade ${autoTradeBot ? "active" : "off"} · phase ${autoTradePhase}`}>
             <span className={autoTradeBot ? "text-leef" : "text-subtle"}>●</span>{" "}
-            {engine.autoTrade.bot ? "auto" : "idle"}
+            {autoTradeBot ? "auto" : "idle"}
           </span>
           <Button
             variant="ghost"

@@ -35,6 +35,8 @@ export type ReconcileResult =
   | { status: "unknown"; txid: string };
 
 type HyperionAction = {
+  /** Hyperion's parent action ordinal; notification fragments share this value. */
+  creator_action_ordinal?: unknown;
   act?: {
     account?: unknown;
     name?: unknown;
@@ -55,7 +57,22 @@ export function parseHyperionTransfers(
   if (!Array.isArray(root.actions) || root.actions.length === 0) return null;
   const executed = root.executed !== false;
   const transfers: TxTransfer[] = [];
+  // Hyperion v4.0.4 could return notification traces as duplicate action
+  // documents. v4.0.5 groups them by creator_action_ordinal. Apply the same
+  // narrow rule client-side for older history endpoints: collapse only rows
+  // with the same explicit parent ordinal. Never content-dedupe, because
+  // genuinely distinct identical transfers in one transaction are valid.
+  const seenCreatorOrdinals = new Set<string>();
   for (const row of root.actions as HyperionAction[]) {
+    const ordinal = row?.creator_action_ordinal;
+    if (
+      (typeof ordinal === "string" && ordinal.length > 0) ||
+      (typeof ordinal === "number" && Number.isFinite(ordinal))
+    ) {
+      const key = String(ordinal);
+      if (seenCreatorOrdinals.has(key)) continue;
+      seenCreatorOrdinals.add(key);
+    }
     const act = row?.act;
     if (!act || act.name !== "transfer") continue;
     const contract = typeof act.account === "string" ? act.account : "";

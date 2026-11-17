@@ -298,6 +298,46 @@ describe("candidate identity and execution-mode binding", () => {
     )).toBe(false);
   });
 
+  it("keeps the manual preview path usable without treating it as an executable route", () => {
+    const preview: AiProposalContext = {
+      ...context,
+      candidateKind: "preview",
+      candidateKey: "manual-preview",
+      candidate: {
+        kind: "preview",
+        key: "manual-preview",
+        tokenIn: "WAX",
+        tokenOut: "LEEF",
+        amountIn: 10,
+      },
+      allowedActions: ["hold", "buy"],
+    };
+    const p = parseAiProposal(answers(), preview);
+    expect(p).not.toBeNull();
+    expect(p!.action).toBe("buy");
+    expect(p!.executionMode).toBe("paper");
+  });
+
+  it("allows distinct token symbols issued by the same contract", () => {
+    const sameContract: AiProposalContext = {
+      ...swapContext,
+      candidate: {
+        ...swapContext.candidate,
+        tokenIn: "AAA",
+        tokenInContract: "tokens.contract",
+        tokenOut: "BBB",
+        tokenOutContract: "tokens.contract",
+      },
+    };
+    const p = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
+    }, sameContract);
+    expect(p?.action).toBe("swap");
+    expect(p?.params.tokenIn).toBe("AAA");
+    expect(p?.params.tokenOut).toBe("BBB");
+  });
+
   it("requires complete code-owned token identity and sizing for buys as well as swaps", () => {
     const incomplete = {
       ...context,

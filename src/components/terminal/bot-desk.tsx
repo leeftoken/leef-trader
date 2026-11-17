@@ -397,6 +397,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           )}
         </Card>
       )}
+      {!hasRecoveryLock && recoveryNotice && (
+        <Card className="border-border/60 bg-background/70 p-3 sm:p-4">
+          <p className="text-xs text-muted-foreground">{recoveryNotice}</p>
+        </Card>
+      )}
 
       <Card className="p-3 sm:p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">

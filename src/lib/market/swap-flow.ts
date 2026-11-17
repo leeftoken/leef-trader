@@ -305,6 +305,19 @@ export class FlowTracker {
     if (at > (this.lastSwapAt.get(poolId) ?? 0)) this.lastSwapAt.set(poolId, at);
   }
 
+  /**
+   * Bound the long-lived per-pool maps to the current snapshot. The rolling
+   * swap arrays are time-bounded, but last-swap/checkpoint evidence otherwise
+   * survives forever as pool ids churn across discovery refreshes.
+   */
+  retainPools(activePoolIds: Iterable<number>): void {
+    const active = new Set(activePoolIds);
+    for (const id of this.swaps.keys()) if (!active.has(id)) this.swaps.delete(id);
+    for (const id of this.lastSqrt.keys()) if (!active.has(id)) this.lastSqrt.delete(id);
+    for (const id of this.lastMove.keys()) if (!active.has(id)) this.lastMove.delete(id);
+    for (const id of this.lastSwapAt.keys()) if (!active.has(id)) this.lastSwapAt.delete(id);
+  }
+
   /** Rolling state for every pool with any tracked swap or tape evidence. */
   allStates(now: number): PoolFlowState[] {
     const out: PoolFlowState[] = [];
@@ -624,6 +637,11 @@ export class SwapFlowService {
     snap: Pick<LeefSnapshot, "pools" | "aux">,
     opts?: { selfAccount?: string | null },
   ): void {
+    const activePoolIds = new Set([...snap.pools, ...snap.aux].map((pool) => pool.id));
+    this.tracker.retainPools(activePoolIds);
+    for (const id of this.checkpoints.keys()) if (!activePoolIds.has(id)) this.checkpoints.delete(id);
+    for (const id of this.lastMismatchAt.keys()) if (!activePoolIds.has(id)) this.lastMismatchAt.delete(id);
+
     const self = opts?.selfAccount?.trim().toLowerCase() || null;
     for (const ev of events) {
       if (

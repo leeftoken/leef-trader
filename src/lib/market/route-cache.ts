@@ -22,6 +22,9 @@ export type CachedRouteEntry = {
 
 export type TrackedRoutePool = LeefPool | AuxPool;
 
+/** Hard cap: users can explore many token pairs in a long-lived terminal. */
+export const MAX_ROUTE_CACHE_ENTRIES = 128;
+
 /** Fields that matter for executable route identity and pricing. */
 export function poolFingerprint(pool: TrackedRoutePool): string {
   if ("leef" in pool) {
@@ -53,6 +56,8 @@ export function poolFingerprint(pool: TrackedRoutePool): string {
     pool.liquidity ?? "0",
     pool.tokenA.quantity,
     pool.tokenB.quantity,
+    pool.tvlUsd,
+    pool.volume24Usd,
     pool.priceA ?? "0",
     pool.priceB ?? "0",
   ].join("|");
@@ -124,11 +129,22 @@ export class RouteCache {
   }
 
   put(entry: Omit<CachedRouteEntry, "createdAt">): void {
+    this.entries.delete(entry.key);
     this.entries.set(entry.key, { ...entry, createdAt: Date.now() });
+    while (this.entries.size > MAX_ROUTE_CACHE_ENTRIES) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+    }
   }
 
   get(key: string): CachedRouteEntry | null {
-    return this.entries.get(key) ?? null;
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+    // LRU touch: frequently-used token pairs survive longer than one-off views.
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry;
   }
 
   /** None of the entry's dependency pools bumped since it was computed. */

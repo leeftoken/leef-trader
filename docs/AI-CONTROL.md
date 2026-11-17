@@ -23,7 +23,7 @@ The AI Helper is **not** a second per-trade approver. Making it approve every tr
 The application sends Jev:
 - Market regime, realized volatility, pool disagreement, danger score and quote age
 - Position size, entry mark, unrealized PnL, session results and configured risk limits
-- The deterministic candidate's token pair and contract identities, input amount, expected output/edge, impact, pool path and hop count
+- The deterministic candidate's token pair and contract identities, input amount, expected output/edge, impact, pool liquidity, pool path and hop count
 - A source snapshot timestamp, candidate identity, request time and returned model identifier
 
 Jev can return only:

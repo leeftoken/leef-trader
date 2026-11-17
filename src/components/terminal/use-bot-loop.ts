@@ -45,6 +45,7 @@ import { classifyRegime, dangerScore } from "@/lib/leef/regime";
 import { maybeAutoReview } from "@/lib/leef/ai-review";
 import {
   AI_EXEC_CONFIDENCE_MIN,
+  buildAiCandidateKey,
   AI_PROPOSAL_MAX_AGE_MS,
   aiSummaryOf,
   buildAiQuestions,
@@ -687,12 +688,16 @@ async function runBotOnceInner(
             hops: decision.route.legs.length,
           }
         : {};
-  const candidateKey =
-    decision.kind === "buy"
-      ? `${b.strategy}:buy:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
-      : decision.kind === "swap"
-        ? `${b.strategy}:swap:${candidateTokenIn}@${candidateTokenInContract ?? "unknown"}:${candidateTokenOut}@${candidateTokenOutContract ?? "unknown"}:${routeSignature(decision.route)}`
-        : "other";
+  const candidateRouteSignature =
+    decision.kind === "buy" || decision.kind === "swap"
+      ? routeSignature(decision.route)
+      : "none";
+  const candidateKey = buildAiCandidateKey(
+    b.strategy,
+    candidateKind,
+    candidateDetails,
+    candidateRouteSignature,
+  );
   // Jev judges the existing strategy/token-pair candidate. It cannot invent
   // another trade type or token pair; route selection remains engine-owned.
   maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);

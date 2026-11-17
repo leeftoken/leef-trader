@@ -113,12 +113,17 @@ fingerprint of the exact candidate (strategy, contract-aware pair, input
 amount, USD notional, expected output/edge, impact, pool liquidity, pools, hops and route).
 Default is **OFF** (zero Jev calls).
 
-- **SUGGEST** — proposals surface on the AI desk only.
-- **CONTROL** — a fresh proposal at/above confidence 0.75 becomes an
-  execution *candidate* and still runs the unchanged gauntlet (USD bounds,
-  learned ceiling, exact-quote gate, governor, resource preflight, policy
-  firewall, sign/reconcile). Enabling CONTROL requires an explicit confirm
-  dialog. The store refuses `setAiControl("control")` without `confirmed`.
+- **SUGGEST** — Jev runs on the existing background/non-blocking cadence;
+  proposals surface on the AI desk and do not gate execution.
+- **CONTROL** — the bot starts a request for the exact deterministic candidate
+  at the beginning of the cycle and awaits that same response at the execution
+  gate. Buy/swap proposals may use only a supplied size bucket that caps the
+  engine candidate. Atomic arb proposals are accept/reject only and cannot be
+  resized or rerouted. Every accepted candidate still runs the unchanged
+  gauntlet (USD bounds, learned ceiling where applicable, exact-quote gate,
+  governor, resource preflight, policy firewall, simulation, sign/reconcile).
+  Enabling CONTROL requires an explicit confirm dialog. The store refuses
+  `setAiControl("control")` without `confirmed`.
 - The CONTROL confirm dialog discloses that balances, open position
   size/USD, strategy, and top pool stats go to TypeSafe. No keys.
 - Jev cannot suppress a protective engine exit. Fail-closed: any non-OK

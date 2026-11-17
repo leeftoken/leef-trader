@@ -133,13 +133,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const flowGuardEnabled = useTerminal((s) => s.flowGuardEnabled);
   const setFlowGuardEnabled = useTerminal((s) => s.setFlowGuardEnabled);
   const aiControl = useTerminal((s) => s.aiControl);
-  const previewNow = useNow();
-  const [previewFlowStates, setPreviewFlowStates] = useState<PoolFlowState[] | null>(null);
-  useEffect(() => {
-    setPreviewFlowStates(
-      flowGuardEnabled ? swapFlow.tracker.allStates(previewNow) : null,
-    );
-  }, [flowGuardEnabled, previewNow, snap]);
+  const previewNow = useNow(5_000);
+  const previewFlowStates = useMemo(
+    () => (flowGuardEnabled ? swapFlow.tracker.allStates(previewNow) : null),
+    [flowGuardEnabled, previewNow, snap],
+  );
   const previewRisk = useMemo(
     () => ({ ...b.risk, maxQuoteAgeSec: Math.max(b.risk.maxQuoteAgeSec, syncSec + 15) }),
     [b.risk, syncSec],

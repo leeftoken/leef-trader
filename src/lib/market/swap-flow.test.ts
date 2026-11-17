@@ -177,6 +177,19 @@ describe("global_sequence dedupe", () => {
   });
 });
 
+describe("flow-state retention", () => {
+  it("drops state for pools that are no longer in the active book", () => {
+    const tracker = new FlowTracker();
+    tracker.note(event(1, { poolId: 217, at: T0 - 1_000 }), "A");
+    tracker.note(event(2, { poolId: 999, at: T0 - 500 }), "A");
+
+    tracker.retainPools([217]);
+
+    expect(tracker.allStates(T0).map((state) => state.poolId)).toEqual([217]);
+    expect(tracker.stateFor(999, T0).lastSwapAt).toBe(0);
+  });
+});
+
 describe("flow-state reducer (signed deltas → imbalance)", () => {
   it("a LEEF outflow is a BUY; signed flow and imbalance follow", () => {
     const t = new FlowTracker();

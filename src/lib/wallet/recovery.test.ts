@@ -124,6 +124,16 @@ describe("assessUnknownExecution", () => {
     expect(assessUnknownExecution(arb, twoWay, context)).toMatchObject({ ok: true });
   });
 
+
+  it("rejects an arbitrage whose gross quote-token debit differs from the saved input, even when net delta is positive", () => {
+    const arb = execution({ action: "arb", tokenIn: "WAX", tokenOut: "WAX", amountIn: 10 });
+    const transfers: TxTransfer[] = [
+      { contract: "eosio.token", from: account, to: "swap.alcor", quantity: "1.00000000 WAX", amount: 1, symbol: "WAX", memo: "buy leg" },
+      { contract: "eosio.token", from: "swap.alcor", to: account, quantity: "2.00000000 WAX", amount: 2, symbol: "WAX", memo: "sell leg" },
+    ];
+    expect(assessUnknownExecution(arb, transfers, context)).toMatchObject({ ok: false });
+  });
+
   it("refuses entries without a stored live execution identity", () => {
     expect(
       assessUnknownExecution(execution({ status: "paper" }), buyTransfers, context),

@@ -83,13 +83,15 @@ describe("AI execution boundary", () => {
     }
   });
 
-  it("the Jev key is server-only and the browser never calls TypeSafe directly", () => {
+  it("Trader uses the shared Signer Jev gateway and never stores the TypeSafe key", () => {
     expect(read("./jev-client.ts").includes("TYPESAFE_API_KEY")).toBe(false);
     expect(read("./ai-executor.ts").includes("TYPESAFE_API_KEY")).toBe(false);
     expect(read("./jev-client.ts").includes("typesafe.ai")).toBe(false);
     expect(read("./ai-executor.ts").includes("typesafe.ai")).toBe(false);
-    // The ONLY TypeSafe endpoint references live in api/ serverless functions.
-    expect(read("../../../api/jev.ts").includes("TYPESAFE_API_KEY")).toBe(true);
+    const route = read("../../../api/jev.ts");
+    expect(route.includes("TYPESAFE_API_KEY")).toBe(false);
+    expect(route.includes("leef-trader-ai.leef-trader.workers.dev/api/judge")).toBe(true);
+    expect(route.includes("JSON.stringify({ state: b.state, questions: b.questions })")).toBe(true);
   });
 
   it("use-bot-loop is the ONLY trade-path module allowed at the Jev seam, and only via ai-executor/jev-client", () => {

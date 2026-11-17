@@ -185,6 +185,12 @@ describe("buildAiCandidateKey", () => {
     expect(buildAiCandidateKey("grid", "buy", details, "direct:217")).not.toBe(base);
   });
 
+  it("binds atomic arb identity to its arb kind", () => {
+    const volume = buildAiCandidateKey("volume", "arb", { ...details, arbKind: "volume" }, "atomic:217>218");
+    const spread = buildAiCandidateKey("volume", "arb", { ...details, arbKind: "spread" }, "atomic:217>218");
+    expect(volume).not.toBe(spread);
+  });
+
   it("normalizes token identity while preserving exact numeric candidate values", () => {
     const base = buildAiCandidateKey("auto", "buy", details, "direct:217");
     const normalized = buildAiCandidateKey("auto", "buy", {
@@ -322,6 +328,12 @@ describe("isAiProposalFresh", () => {
     const bound = parseAiProposal(answers(), context)!;
     expect(isAiProposalFresh(bound, "1970-01-01T00:04:00.000Z", 240_000)).toBe(false);
     expect(isAiProposalFresh(bound, "1970-01-01T00:01:45.000Z", 99_000)).toBe(false);
+  });
+
+  it("does not treat a response as fresh at request-start time before it has arrived", () => {
+    const proposal = parseAiProposal(answers(), context)!;
+    expect(isAiProposalFresh(proposal, "1970-01-01T00:01:45.000Z", context.requestedAt)).toBe(false);
+    expect(isAiProposalFresh(proposal, "1970-01-01T00:01:45.000Z", context.receivedAt)).toBe(true);
   });
 
   it("rejects delayed, future-dated or late-arriving responses", () => {

@@ -55,7 +55,7 @@ import {
   type AiCandidateSummary,
   type AiProposal,
 } from "@/lib/leef/ai-executor";
-import { askJev } from "@/lib/leef/jev-client";
+import { askJev, askJevDetailed } from "@/lib/leef/jev-client";
 import { refreshExecutionState } from "@/lib/market/execution-state";
 import { aggregateFlowRisk, swapFlow } from "@/lib/market/swap-flow";
 import { governTrade, portfolioState } from "@/lib/market/portfolio-governor";
@@ -114,9 +114,17 @@ function maybeKickAiPoll(
   const terminal = useTerminal.getState();
   const aiMode = terminal.aiControl;
   if (aiMode === "off") return;
-  if (aiMode === "control" && candidateKind === "other") {
+  // CONTROL has its own awaited, candidate-specific request below. The
+  // 45-second background cadence is only for non-blocking SUGGEST mode.
+  if (aiMode === "control") {
+    if (candidateKind === "other") {
+      terminal.setAiProposal(null);
+      aiLastPollAt = 0;
+    }
+    return;
+  }
+  if (candidateKind === "other") {
     terminal.setAiProposal(null);
-    aiLastPollAt = 0;
     return;
   }
   if (snap.source !== "live") return;
@@ -172,6 +180,115 @@ function maybeKickAiPoll(
       aiPollInFlight = false;
     }
   })();
+}
+
+type AiControlRequestResult = { proposal: AiProposal | null; error: string | null };
+
+/**
+ * CONTROL must obtain a judgement for this exact deterministic candidate
+ * during this trading cycle. Unlike SUGGEST, this is awaited by the cycle
+ * before it can reach signing. A failure is surfaced to the decision log.
+ */
+async function requestAiControlProposal(
+  snap: LeefSnapshot,
+  b: ReturnType<typeof useBot.getState>,
+  balances: Record<string, number>,
+  mode: "paper" | "live",
+  candidateKind: AiCandidateKind,
+  candidateKey: string,
+  candidateDetails: Omit<AiCandidateSummary, "kind" | "key">,
+): Promise<AiControlRequestResult> {
+  if (import.meta.env.MODE === "test") {
+    return { proposal: null, error: "Jev requests are disabled in tests" };
+  }
+  if (mode !== "live" || snap.source !== "live") {
+    return { proposal: null, error: "CONTROL requires a live wallet and live market snapshot" };
+  }
+
+  const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey, candidateDetails);
+  const requestedAt = Date.now();
+  try {
+    const result = await askJevDetailed(summary, buildAiQuestions(summary));
+    const receivedAt = Date.now();
+    if (!result.ok) {
+      const error = `${result.code}: ${result.message}`;
+      useTerminal.getState().setAiProposal(null);
+      journal({
+        kind: "ai",
+        aiSource: "jev",
+        reason: `Jev CONTROL request failed · ${error}`,
+        latencyMs: receivedAt - requestedAt,
+        strategy: b.strategy,
+        mode,
+        leefUsd: summary.leefUsd,
+        waxUsd: summary.waxUsd,
+      });
+      return { proposal: null, error };
+    }
+
+    const proposal = parseAiProposal(result.answers, {
+      snapshotFetchedAt: summary.fetchedAt,
+      requestedAt,
+      receivedAt,
+      model: result.model,
+      candidateKind: summary.candidateKind,
+      candidateKey: summary.candidateKey,
+      candidate: summary.candidate,
+      allowedActions: summary.allowedActions,
+    });
+    if (!proposal) {
+      const error = "Jev returned an answer that did not satisfy the candidate, safety or response-schema checks";
+      useTerminal.getState().setAiProposal(null);
+      journal({
+        kind: "ai",
+        aiSource: "jev",
+        aiModel: result.model,
+        reason: `Jev CONTROL response rejected · ${error}`,
+        latencyMs: receivedAt - requestedAt,
+        strategy: b.strategy,
+        mode,
+        leefUsd: summary.leefUsd,
+        waxUsd: summary.waxUsd,
+      });
+      return { proposal: null, error };
+    }
+
+    const terminal = useTerminal.getState();
+    if (terminal.aiControl !== "control") {
+      terminal.setAiProposal(null);
+      return { proposal: null, error: "CONTROL was switched off while Jev was responding" };
+    }
+    terminal.setAiProposal(proposal);
+    journal({
+      kind: "ai",
+      aiSource: "jev",
+      aiModel: proposal.model,
+      aiSnapshotAt: proposal.snapshotFetchedAt,
+      decision: proposal.action,
+      strategy: b.strategy,
+      mode,
+      reason: `jev CONTROL proposal ${proposal.action} · provider=${result.provider ?? "primary/unknown"} · confidence=${proposal.confidence.toFixed(2)} · snapshot=${proposal.snapshotFetchedAt}`,
+      latencyMs: receivedAt - requestedAt,
+      confidence: proposal.confidence,
+      regime: summary.market.regime,
+      volPct: summary.market.volatilityPct,
+      dangerScore: summary.market.dangerScore,
+      leefUsd: summary.leefUsd,
+      waxUsd: summary.waxUsd,
+    });
+    return { proposal, error: null };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : "Unexpected Jev request failure";
+    useTerminal.getState().setAiProposal(null);
+    journal({
+      kind: "ai",
+      aiSource: "jev",
+      reason: `Jev CONTROL request failed · ${error}`,
+      strategy: b.strategy,
+      mode,
+    });
+    return { proposal: null, error };
+  }
 }
 
 function equityUsdOf(balances: Record<string, number>, snap: LeefSnapshot): number {
@@ -638,11 +755,29 @@ async function runBotOnceInner(
   }
 
   const candidateKind: AiCandidateKind =
-    decision.kind === "buy" ? "buy" : decision.kind === "swap" ? "swap" : "other";
+    decision.kind === "buy"
+      ? "buy"
+      : decision.kind === "swap"
+        ? "swap"
+        : decision.kind === "arb"
+          ? "arb"
+          : "other";
   const candidateTokenIn =
-    decision.kind === "buy" ? b.quote || "WAX" : decision.kind === "swap" ? decision.tokenIn : undefined;
+    decision.kind === "buy"
+      ? b.quote || "WAX"
+      : decision.kind === "swap"
+        ? decision.tokenIn
+        : decision.kind === "arb"
+          ? decision.plan.quoteToken.symbol
+          : undefined;
   const candidateTokenOut =
-    decision.kind === "buy" ? b.base || "LEEF" : decision.kind === "swap" ? decision.tokenOut : undefined;
+    decision.kind === "buy"
+      ? b.base || "LEEF"
+      : decision.kind === "swap"
+        ? decision.tokenOut
+        : decision.kind === "arb"
+          ? decision.plan.quoteToken.symbol
+          : undefined;
   const candidateTokenInContract = (() => {
     if (!candidateTokenIn) return undefined;
     try {
@@ -690,20 +825,47 @@ async function runBotOnceInner(
             poolIds: decision.route.poolIds,
             hops: decision.route.legs.length,
           }
-        : {};
+        : decision.kind === "arb"
+          ? {
+              arbKind: decision.arbKind ?? "spread",
+              tokenIn: candidateTokenIn,
+              tokenInContract: decision.plan.quoteToken.contract,
+              tokenOut: candidateTokenOut,
+              tokenOutContract: decision.plan.quoteToken.contract,
+              amountIn: decision.plan.quoteIn,
+              amountUsd: decision.plan.quoteIn * (usdPriceOf(decision.plan.quoteToken.symbol, snap) || 0),
+              expectedOut: decision.plan.quoteOut,
+              expectedNetEdgePct: decision.plan.profitPct * 100,
+              priceImpactPct: decision.plan.impactPct * 100,
+              liquidityUsd: Math.min(decision.plan.buyPool.tvlUsd, decision.plan.sellPool.tvlUsd),
+              poolIds: [...new Set([decision.plan.buyPool.id, decision.plan.sellPool.id])],
+              hops: 2,
+            }
+          : {};
   const candidateRouteSignature =
     decision.kind === "buy" || decision.kind === "swap"
       ? routeSignature(decision.route)
-      : "none";
+      : decision.kind === "arb"
+        ? `atomic:${decision.plan.buyPool.id}>${decision.plan.sellPool.id}`
+        : "none";
   const candidateKey = buildAiCandidateKey(
     b.strategy,
     candidateKind,
     candidateDetails,
     candidateRouteSignature,
   );
-  // Jev judges the existing strategy/token-pair candidate. It cannot invent
-  // another trade type or token pair; route selection remains engine-owned.
-  maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
+  // CONTROL starts a candidate-bound request now and awaits this same promise
+  // at its execution gate. SUGGEST remains background/non-blocking.
+  let controlProposalPromise: Promise<AiControlRequestResult> | null = null;
+  const aiModeAtCandidate = useTerminal.getState().aiControl;
+  if (aiModeAtCandidate === "control" && candidateKind !== "other") {
+    useTerminal.getState().setAiProposal(null);
+    controlProposalPromise = requestAiControlProposal(
+      snap, b, balances, mode, candidateKind, candidateKey, candidateDetails,
+    );
+  } else {
+    maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
+  }
 
   b.setLastReason(decision.reason);
 
@@ -805,19 +967,24 @@ async function runBotOnceInner(
   // reconcile).
   if (
     useTerminal.getState().aiControl === "control" &&
-    (decision.kind === "buy" || decision.kind === "swap")
+    (decision.kind === "buy" || decision.kind === "swap" || decision.kind === "arb")
   ) {
-    const p = useTerminal.getState().aiProposal;
+    // Unlike the old fire-and-forget poll, CONTROL waits for the response
+    // started for this exact candidate earlier in this same cycle.
+    const controlResult = controlProposalPromise
+      ? await controlProposalPromise
+      : { proposal: null, error: "No Jev judgement request was created for this candidate" };
+    const p = controlResult.proposal;
     const currentSnapshotAt = snapFreshAtMs(snap);
     const fresh: AiProposal | null =
       Number.isFinite(currentSnapshotAt) &&
       isAiProposalFresh(
         p,
         new Date(currentSnapshotAt).toISOString(),
-        cycleT0,
+        Date.now(),
         AI_PROPOSAL_MAX_AGE_MS,
       ) &&
-      p?.candidateKind === decision.kind &&
+      p?.candidateKind === candidateKind &&
       p?.candidateKey === candidateKey
         ? p
         : null;
@@ -827,12 +994,15 @@ async function runBotOnceInner(
       return { kind: "hold", reason };
     };
     if (!fresh) {
-      return aiHold("AI control: no fresh Jev judgement for this exact engine candidate — candidate paused");
+      const detail = controlResult.error
+        ? `Jev unavailable/rejected (${controlResult.error})`
+        : "no fresh judgement matched this exact candidate";
+      return aiHold(`AI control: ${detail} — candidate paused`);
     }
     journal({
       kind: "gate",
       gate: "ai",
-      pass: fresh.confidence >= AI_EXEC_CONFIDENCE_MIN,
+      pass: fresh.confidence >= AI_EXEC_CONFIDENCE_MIN && fresh.action !== "hold",
       reason: `Jev ${fresh.action} ${fresh.candidateKind} candidate · weakest=${fresh.weakest} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`,
       strategy: b.strategy,
       mode,
@@ -847,9 +1017,13 @@ async function runBotOnceInner(
     if (fresh.action === "hold") {
       return aiHold(`AI control: Jev rejected the ${fresh.candidateKind} candidate — ${fresh.rationale}`);
     }
-    const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
     const tag = `AI · Jev accepted ${fresh.candidateKind} conf=${fresh.confidence.toFixed(2)} · ${fresh.rationale}`;
-    if (fresh.action === "buy" && decision.kind === "buy") {
+    if (decision.kind === "arb" && fresh.action === "arb") {
+      // The exact atomic round-trip was already sized and simulated by the
+      // deterministic engine. Jev can accept/reject it, but cannot resize it.
+      decision = { ...decision, reason: tag };
+    } else if (decision.kind === "buy" && fresh.action === "buy") {
+      const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
       // Jev's bucket is a HARD CAP on the engine candidate, never a request
       // to increase it. If the selected fraction falls below minTrade, sit out.
       const jevMaxIn = Math.min(bounds.maxIn, decision.amountIn * sizePct);
@@ -864,7 +1038,8 @@ async function runBotOnceInner(
       const route = bestExecutionRoute(book.pools, book.aux, jevMaxIn, quoteTok, baseTok);
       if (!route) return aiHold("AI control: accepted buy candidate has no executable route on the refreshed book");
       decision = { kind: "buy", amountIn: jevMaxIn, route, reason: tag, confidence: fresh.confidence };
-    } else if (fresh.action === "swap" && decision.kind === "swap") {
+    } else if (decision.kind === "swap" && fresh.action === "swap") {
+      const sizePct = Math.min(100, Math.max(1, Number(fresh.params.sizePct ?? "100"))) / 100;
       const tokenIn = decision.tokenIn;
       const tokenOut = decision.tokenOut;
       const held = balances[tokenIn] ?? 0;

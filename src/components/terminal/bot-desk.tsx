@@ -59,9 +59,11 @@ import { isEconomicFailureReason } from "@/lib/wallet/trade-error";
 import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
-import { journal } from "@/lib/leef/journal";
-import { liveCapitalBlocked, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
-import { waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
+import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
+import { liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
+import { assessUnknownExecution } from "@/lib/wallet/recovery";
+import { metaOf } from "@/lib/wallet/tokens";
 import { swapFlow } from "@/lib/market/swap-flow";
 import { buildBotVolumeContext } from "@/lib/market/volume-context";
 
@@ -102,6 +104,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const [busyForce, setBusyForce] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryResult, setRecoveryResult] = useState<ReconcileResult | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const unresolvedTxid = pendingTxid();
   const unresolvedPhase = tradePhase();
   const hasRecoveryLock = liveCapitalBlocked();
@@ -109,10 +112,72 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   async function inspectPendingSettlement() {
     if (!unresolvedTxid || recoveryBusy) return;
     setRecoveryBusy(true);
+    setRecoveryNotice(null);
     try {
       const result = await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 });
       setRecoveryResult(result);
-      if (result.status === "failed") markFailed();
+      if (result.status === "failed") {
+        markFailed();
+        setRecoveryNotice("The transaction failure was independently confirmed. The live capital lock has been released; no fill was booked.");
+        return;
+      }
+      if (result.status !== "confirmed") {
+        setRecoveryNotice("The chain has not provided enough transfer evidence yet. The live capital lock remains in place.");
+        return;
+      }
+
+      const entries = await journalAll();
+      const matching = entries.filter(
+        (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === unresolvedTxid,
+      );
+      if (matching.length !== 1) {
+        setRecoveryNotice(
+          "The transaction is confirmed, but there is no unique saved live-trade record to map it safely to a bot position. The lock remains in place; copy the transaction ID and contact support.",
+        );
+        return;
+      }
+
+      const entry = matching[0]!;
+      const botState = useBot.getState();
+      let actualOut = 0;
+      if (botState.recoveredTxids.includes(unresolvedTxid)) {
+        // The position update may have completed just before a tab reload.
+        // Re-derive the output amount from chain transfers, then finish the
+        // audit-row update without applying the position change twice.
+        const outputMeta = entry.tokenOut ? metaOf(entry.tokenOut, snap) : null;
+        if (!outputMeta) {
+          setRecoveryNotice("The position update was already applied, but the output-token contract is ambiguous. The lock remains in place for review.");
+          return;
+        }
+        actualOut = assetDelta(result.transfers, account, outputMeta.symbol, outputMeta.contract);
+      } else {
+        const assessment = assessUnknownExecution(entry, result.transfers, {
+          account,
+          base: b.base || "LEEF",
+          quote: b.quote || "WAX",
+          strategy: b.strategy,
+          position: botState.position,
+          snapshot: snap,
+        });
+        if (!assessment.ok) {
+          setRecoveryNotice(`Transaction confirmed, but automatic recovery was blocked: ${assessment.reason} The lock remains in place.`);
+          return;
+        }
+        actualOut = assessment.actualOut;
+        // Zustand persist writes the changed position and its txid marker in
+        // one state update. The marker makes a retry after reload idempotent.
+        botState.applyRecoveredExecution(unresolvedTxid, assessment.nextPosition);
+      }
+
+      const journalSaved = await settleUnknownExecution(unresolvedTxid, actualOut);
+      if (!journalSaved) {
+        setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
+        return;
+      }
+      markConfirmed(); // clear the guard only after state + journal reconciliation
+      setRecoveryNotice("Recovered from confirmed on-chain transfers. Bot position state and the evidence journal are reconciled; the live capital lock is released. Historical P&L was not estimated.");
+    } catch (error) {
+      setRecoveryNotice(error instanceof Error ? error.message : "Recovery inspection failed. The live capital lock remains in place.");
     } finally {
       setRecoveryBusy(false);
     }
@@ -306,14 +371,14 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
             {unresolvedTxid && (
               <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
                 {recoveryBusy ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <ScanSearch className="mr-2 size-3.5" />}
-                Inspect settlement
+                Inspect & reconcile
               </Button>
             )}
           </div>
           {recoveryResult && (
             <div className="mt-3 rounded-md border border-border/60 bg-background/70 p-3">
               <div className="text-xs font-medium">
-                {recoveryResult.status === "confirmed" ? "Transfer evidence found — position still requires reconciliation" : recoveryResult.status === "failed" ? "Failure independently confirmed — capital lock released" : "Still unresolved — capital remains locked"}
+                {recoveryResult.status === "confirmed" ? "Confirmed transaction transfer evidence" : recoveryResult.status === "failed" ? "Failure independently confirmed" : "Transaction remains unresolved"}
               </div>
               {recoveryResult.status === "confirmed" && (
                 <div className="mt-2 space-y-1">
@@ -326,9 +391,15 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 </div>
               )}
               {recoveryResult.status === "failed" && <p className="mt-1 text-[11px] text-muted-foreground">{recoveryResult.error}</p>}
-              <p className="mt-2 text-[11px] text-muted-foreground">This inspector never retries a transaction. A lock is released only when the chain failure is independently confirmed; successful transfers remain locked until position accounting is reconciled.</p>
+              {recoveryNotice && <p className="mt-2 text-[11px] text-muted-foreground">{recoveryNotice}</p>}
+              <p className="mt-2 text-[11px] text-muted-foreground">Recovery is read-only: it never retries or broadcasts. A successful transaction unlocks trading only after the matching saved execution is verified, bot position state is updated idempotently, and the evidence journal is settled.</p>
             </div>
           )}
+        </Card>
+      )}
+      {!hasRecoveryLock && recoveryNotice && (
+        <Card className="border-border/60 bg-background/70 p-3 sm:p-4">
+          <p className="text-xs text-muted-foreground">{recoveryNotice}</p>
         </Card>
       )}
 

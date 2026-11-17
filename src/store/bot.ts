@@ -106,6 +106,8 @@ type BotState = {
   goals: BotGoals;
   risk: BotRisk;
   position: Position | null;
+  /** Txids whose recovered effects have already been atomically applied to the position state. */
+  recoveredTxids: string[];
   gridAnchor: number | null;
   stats: BotStats;
   series: PricePoint[];
@@ -147,6 +149,8 @@ type BotState = {
   pushDecision: (d: Omit<BotDecisionLog, "id" | "t">) => void;
   markTrade: (cooldownSec: number) => void;
   setPosition: (p: Position | null) => void;
+  /** Idempotently persist an on-chain recovery and its resulting position. */
+  applyRecoveredExecution: (txid: string, position: Position | null) => void;
   setGridAnchor: (usd: number | null) => void;
   bumpPositionHigh: (usd: number) => void;
   recordResult: (pnlUsd: number, equityUsd: number, mode: "live" | "paper") => void;
@@ -210,6 +214,7 @@ export const useBot = create<BotState>()(
       goals: { ...DEFAULT_GOALS },
       risk: { ...DEFAULT_RISK },
       position: null,
+      recoveredTxids: [],
       gridAnchor: null,
       stats: freshStats(0),
       series: [],
@@ -307,6 +312,16 @@ export const useBot = create<BotState>()(
         });
       },
       setPosition: (position) => set({ position }),
+      applyRecoveredExecution: (txid, position) =>
+        set((s) =>
+          s.recoveredTxids.includes(txid)
+            ? {}
+            : {
+                position,
+                recoveredTxids: [...s.recoveredTxids, txid].slice(-100),
+                lastReason: `Recovered confirmed on-chain transaction ${txid.slice(0, 10)}…; position state reconciled.`,
+              },
+        ),
       setGridAnchor: (gridAnchor) => set({ gridAnchor }),
       bumpPositionHigh: (usd) =>
         set((s) =>
@@ -440,7 +455,8 @@ export const useBot = create<BotState>()(
       // v13: safer risk defaults.
       // v14: distinguish executed transactions from settled closed outcomes.
       // Legacy win counters have no trustworthy denominator, so reset them.
-      version: 14,
+      // v15: persist txids already applied by the explicit recovery flow.
+      version: 15,
       migrate: (persisted, version) => {
         const p = (
           persisted && typeof persisted === "object" ? persisted : {}
@@ -459,6 +475,7 @@ export const useBot = create<BotState>()(
           stats: BotStats;
           series: PricePoint[];
           decisions: BotDecisionLog[];
+          recoveredTxids?: string[];
         }>;
         const usd = migrateRiskToUsd(p.risk);
         const safer = version < 13 ? migrateSaferRiskDefaults(p.goals, p.risk) : null;
@@ -491,6 +508,9 @@ export const useBot = create<BotState>()(
                 : DEFAULT_RISK.maxHops,
           },
           position: p.position ?? null,
+          recoveredTxids: Array.isArray(p.recoveredTxids)
+            ? p.recoveredTxids.filter((txid): txid is string => typeof txid === "string" && /^[a-f0-9]{64}$/i.test(txid)).slice(-100)
+            : [],
           gridAnchor: p.gridAnchor ?? null,
           stats:
             p.stats && typeof p.stats === "object"
@@ -547,6 +567,7 @@ export const useBot = create<BotState>()(
         goals: s.goals,
         risk: s.risk,
         position: s.position,
+        recoveredTxids: s.recoveredTxids.slice(-100),
         gridAnchor: s.gridAnchor,
         stats: s.stats,
         series: s.series.slice(-MAX_SERIES),

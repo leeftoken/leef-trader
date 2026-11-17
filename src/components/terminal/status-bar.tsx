@@ -75,7 +75,7 @@ export function StatusBar({
     headBlockAt > 0 ? Math.max(0, (now - headBlockAt) / 1000) : null;
   const blockFresh = blockAgeSec != null && blockAgeSec < 5;
   const bestRpc = (bestRpcUrl ? { url: bestRpcUrl, latencyMs: bestRpcLatency } : null);
-  const spotAgeMs = snap.spotAt ? now - Date.parse(engine.snapshot.spotAt) : null;
+  const spotAgeMs = snap.spotAt ? now - Date.parse(snap.spotAt) : null;
   const spotFresh = spotAgeMs != null && Number.isFinite(spotAgeMs) && spotAgeMs >= 0 && spotAgeMs < 30_000;
   const route = tick.bestRoute;
   const conversion = route && route.amountIn > 0 ? route.amountOut / route.amountIn : 0;
@@ -156,7 +156,7 @@ export function StatusBar({
             <span className={blockFresh ? "text-leef" : "text-warn"}>●</span> WAX{" "}
             {blockAgeSec != null ? (
               <span className={cn(blockFresh ? "text-fg" : "text-warn")}>
-                #{fmtNum(engine.headBlock, { digits: 0 })} · {blockAgeSec.toFixed(1)}s
+                #{fmtNum(headBlock, { digits: 0 })} · {blockAgeSec.toFixed(1)}s
               </span>
             ) : (
               <span className="text-warn">connecting…</span>
@@ -176,10 +176,10 @@ export function StatusBar({
             }
           >
             <span className={signerReady ? "text-leef" : "text-subtle"}>●</span>{" "}
-            {engine.signer.mode === "live" ? "signer" : "paper"}
+            {signerMode === "live" ? "signer" : "paper"}
           </span>
           <span className="font-mono" title={`Auto trade ${autoTradeBot ? "active" : "off"} · phase ${autoTradePhase}`}>
-            <span className={engine.autoTrade.bot ? "text-leef" : "text-subtle"}>●</span>{" "}
+            <span className={autoTradeBot ? "text-leef" : "text-subtle"}>●</span>{" "}
             {engine.autoTrade.bot ? "auto" : "idle"}
           </span>
           <Button

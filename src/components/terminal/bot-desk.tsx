@@ -166,7 +166,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         actualOut = assessment.actualOut;
         // Zustand persist writes the changed position and its txid marker in
         // one state update. The marker makes a retry after reload idempotent.
-        botState.applyRecoveredExecution(unresolvedTxid, assessment.nextPosition);
+        botState.applyRecoveredExecution(unresolvedTxid, assessment.nextPosition, assessment.recoveredPnlUsd);
       }
 
       const journalSaved = await settleUnknownExecution(unresolvedTxid, actualOut);

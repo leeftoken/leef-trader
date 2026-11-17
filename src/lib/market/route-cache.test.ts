@@ -126,6 +126,32 @@ describe("RouteCache dependency invalidation", () => {
   });
 });
 
+describe("routesCached dependency identity", () => {
+  it("recomputes when a pool disappears from the dependency set", () => {
+    routeCache.clear();
+    const p1 = mkPool(1, 50_000, 500_000_000);
+    const p2 = mkPool(2, 8_000, 90_000_000);
+    routeCache.notePools([p1, p2]);
+    let computes = 0;
+    const compute = () => {
+      computes += 1;
+      return [mkRoute(`route-${computes}`)];
+    };
+
+    routesCached(compute, { key: "dependency-set", poolIds: [1, 2], inputsKey: "same" });
+    // The surviving pool's version has not changed, but pool 2 is no longer
+    // part of the live route graph. A route that may depend on it is invalid.
+    const afterRemoval = routesCached(compute, {
+      key: "dependency-set",
+      poolIds: [1],
+      inputsKey: "same",
+    });
+
+    expect(computes).toBe(2);
+    expect(afterRemoval[0]!.id).toBe("route-2");
+  });
+});
+
 describe("routesCached memo", () => {
   it("recomputes only when inputs or dependency versions move", () => {
     routeCache.clear();

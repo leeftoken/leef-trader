@@ -21,6 +21,7 @@ function summary(): AiSnapshotSummary {
     base: "LEEF",
     quote: "WAX",
     strategy: "auto",
+    executionMode: "paper",
     balances: { WAX: 120, LEEF: 5_000_000 },
     positionUsd: 0.85,
     positionAmount: 5_000_000,

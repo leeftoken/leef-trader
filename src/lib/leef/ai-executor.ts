@@ -49,6 +49,7 @@ export interface AiCandidateSummary {
   expectedOut?: number;
   expectedNetEdgePct?: number;
   priceImpactPct?: number;
+  liquidityUsd?: number;
   poolIds?: number[];
   hops?: number;
 }
@@ -429,6 +430,7 @@ export function buildAiCandidateKey(
     finite(candidate.expectedOut),
     finite(candidate.expectedNetEdgePct),
     finite(candidate.priceImpactPct),
+    finite(candidate.liquidityUsd),
     Array.isArray(candidate.poolIds) ? candidate.poolIds : [],
     finite(candidate.hops),
     routeSignature,

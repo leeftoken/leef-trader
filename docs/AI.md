@@ -110,7 +110,7 @@ probabilities of “yes”; their selected-side confidence is
 `max(noul, 1 - noul)`, while Choice confidence is passed through unchanged.
 The proposal uses the weakest relevant judgment and is bound to a versioned
 fingerprint of the exact candidate (strategy, contract-aware pair, input
-amount, USD notional, expected output/edge, impact, pools, hops and route).
+amount, USD notional, expected output/edge, impact, pool liquidity, pools, hops and route).
 Default is **OFF** (zero Jev calls).
 
 - **SUGGEST** — proposals surface on the AI desk only.

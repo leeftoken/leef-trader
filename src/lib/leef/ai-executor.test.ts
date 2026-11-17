@@ -4,6 +4,7 @@ import {
   AI_QID,
   buildAiQuestions,
   isAiProposalFresh,
+  aiCandidateKeyOf,
   isAiProposalForCandidate,
   makeAiCandidateKey,
   parseAiProposal,
@@ -123,6 +124,26 @@ const swapContext: AiProposalContext = {
   },
   allowedActions: ["hold", "swap"],
 };
+
+describe("AI candidate identity", () => {
+  it("binds Jev approval to the exact assessed amount as well as route and token contracts", () => {
+    const base = {
+      strategy: "auto",
+      kind: "buy" as const,
+      tokenIn: "WAX",
+      tokenInContract: "eosio.token",
+      tokenOut: "LEEF",
+      tokenOutContract: "leefmaincorp",
+      routeKey: "direct:217",
+      amountIn: 100,
+    };
+    const key = aiCandidateKeyOf(base);
+    expect(aiCandidateKeyOf({ ...base, amountIn: 101 })).not.toBe(key);
+    expect(aiCandidateKeyOf({ ...base, routeKey: "direct:218" })).not.toBe(key);
+    expect(aiCandidateKeyOf({ ...base, tokenOutContract: "fake.token" })).not.toBe(key);
+    expect(aiCandidateKeyOf(base)).toBe(key);
+  });
+});
 
 describe("buildAiQuestions", () => {
   it("offers only the action types allowed for the exact deterministic candidate", () => {

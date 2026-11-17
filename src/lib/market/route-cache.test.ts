@@ -202,6 +202,27 @@ describe("routesCached dependency identity", () => {
   });
 });
 
+describe("route cache capacity", () => {
+  it("retains only the most recent 128 route memo entries", () => {
+    const cache = new RouteCache();
+    cache.notePools([mkPool(1, 50_000, 500_000_000)]);
+    for (let i = 0; i < 140; i++) {
+      cache.put({
+        key: `route-${i}`,
+        inputsKey: String(i),
+        routes: [mkRoute(`route-${i}`)],
+        poolIds: [1],
+        poolVersions: { 1: cache.versionOf(1) },
+      });
+    }
+
+    expect(cache.stats().fresh).toBe(128);
+    expect(cache.get("route-0")).toBeNull();
+    expect(cache.get("route-11")).not.toBeNull();
+    expect(cache.get("route-139")).not.toBeNull();
+  });
+});
+
 describe("routesCached memo", () => {
   it("recomputes only when inputs or dependency versions move", () => {
     routeCache.clear();

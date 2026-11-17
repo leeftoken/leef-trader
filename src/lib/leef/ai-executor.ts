@@ -359,7 +359,7 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
     [AI_QID.action]: {
       type: "choice",
       instructions:
-        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its token pair, amount, expected output/edge, route impact and pool path together with state.market, balances and position details. Choose hold to reject it, or the matching candidate action to accept it. You may choose only the supplied size bucket; never invent a trade, change the candidate type or token pair, or choose a route. The engine recalculates the route.",
+        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its exact token pair and contract identities, input amount and USD notional, expected output/net edge, price impact, pool liquidity, pool IDs and hop count together with state.market, balances and position details. Choose hold to reject it, or the matching candidate action to accept it. You may choose only the supplied size bucket; never invent a trade, change the candidate type or token pair, or choose a route. The engine recalculates the route.",
       criteria: actionCriteria,
     },
     [AI_QID.riskStress]: {

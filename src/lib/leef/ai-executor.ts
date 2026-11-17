@@ -12,6 +12,7 @@ import { snapFreshAtMs, type LeefSnapshot } from "./types";
 
 export type AiAction = "hold" | "buy" | "swap";
 export type AiCandidateKind = "buy" | "swap" | "other" | "preview";
+export type AiExecutionMode = "paper" | "live";
 
 export interface AiProposal {
   action: AiAction;
@@ -30,6 +31,7 @@ export interface AiProposal {
   /** Model identifier returned by TypeSafe, retained for auditability. */
   model?: string;
   /** Deterministic candidate this judgement was restricted to. */
+  executionMode?: AiExecutionMode;
   candidateKind?: AiCandidateKind;
   /** Exact deterministic route candidate identity, not a model-generated value. */
   candidateKey?: string;
@@ -58,6 +60,7 @@ export interface AiProposalContext {
   requestedAt: number;
   receivedAt: number;
   model: string;
+  executionMode: AiExecutionMode;
   candidateKind: AiCandidateKind;
   candidateKey: string;
   candidate: AiCandidateSummary;
@@ -94,6 +97,7 @@ export interface AiSnapshotSummary {
   base: string;
   quote: string;
   strategy: string;
+  executionMode: AiExecutionMode;
   balances: Record<string, number>;
   positionUsd: number;
   positionAmount: number;
@@ -183,6 +187,7 @@ export function aiSummaryOf(
   candidateKind: AiCandidateKind = "other",
   candidateKey = "none",
   candidateDetails: Omit<AiCandidateSummary, "kind" | "key"> = {},
+  executionMode: AiExecutionMode = "paper",
 ): AiSnapshotSummary {
   const quote = (b.quote || "WAX").toUpperCase();
   const base = (b.base || "LEEF").toUpperCase();
@@ -286,6 +291,7 @@ export function aiSummaryOf(
     base,
     quote,
     strategy: b.strategy,
+    executionMode,
     balances: Object.fromEntries(
       Object.entries(balances).map(([s, n]) => [s, Number(n.toPrecision(6))]),
     ),
@@ -339,6 +345,39 @@ export function aiSummaryOf(
 }
 
 /**
+ * Exact, stable identity for one strategy-generated AI candidate.
+ *
+ * A route signature alone is not enough: the same path with a different
+ * amount, quote output, modeled edge, or execution mode is a different
+ * decision. The key is constructed by code, never accepted from Jev.
+ */
+export function makeAiCandidateKey(
+  strategy: string,
+  executionMode: AiExecutionMode,
+  kind: AiCandidateKind,
+  candidate: Omit<AiCandidateSummary, "kind" | "key">,
+): string {
+  const n = (value: number | undefined): string =>
+    value != null && Number.isFinite(value) ? value.toPrecision(12) : "n/a";
+  return JSON.stringify([
+    strategy.trim().toLowerCase(),
+    executionMode,
+    kind,
+    candidate.tokenIn?.trim().toUpperCase() ?? "",
+    candidate.tokenInContract?.trim().toLowerCase() ?? "",
+    candidate.tokenOut?.trim().toUpperCase() ?? "",
+    candidate.tokenOutContract?.trim().toLowerCase() ?? "",
+    n(candidate.amountIn),
+    n(candidate.amountUsd),
+    n(candidate.expectedOut),
+    n(candidate.expectedNetEdgePct),
+    n(candidate.priceImpactPct),
+    candidate.poolIds?.join(">") ?? "",
+    candidate.hops ?? "n/a",
+  ]);
+}
+
+/**
  * One request, speculative fan-out: each question is independent and
  * structured. The model chooses only from actions the current loop can
  * actually execute; unsupported rebalancing/cancel actions are not offered.
@@ -385,7 +424,7 @@ export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, Jev
     questions[AI_QID.sizeBucket] = {
       type: "choice",
       instructions:
-        "IF the candidate is accepted, choose the fraction of its deployable input balance to request. The deterministic governor may reduce it further.",
+        "IF the candidate is accepted, choose a fraction of the already-sized candidate input amount. This is a cap and may only reduce the candidate; the deterministic governor may reduce it further.",
       criteria: {
         quarter: "25% — cautious clip.",
         half: "50% — moderate clip.",
@@ -440,6 +479,14 @@ export function parseAiProposal(
   context?: AiProposalContext,
 ): AiProposal | null {
   if (!answers || typeof answers !== "object") return null;
+  if (
+    context &&
+    (
+      (context.executionMode !== "paper" && context.executionMode !== "live") ||
+      context.candidate.kind !== context.candidateKind ||
+      context.candidate.key !== context.candidateKey
+    )
+  ) return null;
   const actionAns = choiceOf(answers, AI_QID.action);
   if (!actionAns || !(AI_ACTIONS as string[]).includes(actionAns.choice)) return null;
   const action = actionAns.choice as AiAction;
@@ -450,6 +497,23 @@ export function parseAiProposal(
     context.candidateKind !== "preview" &&
     action !== context.candidateKind
   ) return null;
+  if (context && action !== "hold") {
+    const c = context.candidate;
+    if (
+      !c.tokenIn ||
+      !c.tokenInContract ||
+      !c.tokenOut ||
+      !c.tokenOutContract ||
+      (c.tokenIn.toUpperCase() === c.tokenOut.toUpperCase() &&
+        c.tokenInContract.toLowerCase() === c.tokenOutContract.toLowerCase()) ||
+      !(typeof c.amountIn === "number" && Number.isFinite(c.amountIn) && c.amountIn > 0) ||
+      !(typeof c.expectedOut === "number" && Number.isFinite(c.expectedOut) && c.expectedOut > 0) ||
+      !Array.isArray(c.poolIds) ||
+      c.poolIds.length === 0 ||
+      !c.poolIds.every((id) => Number.isInteger(id) && id >= 0) ||
+      !(typeof c.hops === "number" && Number.isInteger(c.hops) && c.hops > 0)
+    ) return null;
+  }
 
   const execOk = noulOf(answers, AI_QID.riskExecute);
   const stress = noulOf(answers, AI_QID.riskStress);
@@ -510,6 +574,7 @@ export function parseAiProposal(
           snapshotFetchedAt: context.snapshotFetchedAt,
           requestedAt: context.requestedAt,
           model: context.model,
+          executionMode: context.executionMode,
           candidateKind: context.candidateKind,
           candidateKey: context.candidateKey,
           candidate: context.candidate,
@@ -529,7 +594,14 @@ export function isAiProposalFresh(
   now: number = Date.now(),
   maxAgeMs: number = AI_PROPOSAL_MAX_AGE_MS,
 ): boolean {
-  if (!proposal || !proposal.snapshotFetchedAt || !proposal.model || !proposal.candidateKind || !proposal.candidateKey) return false;
+  if (
+    !proposal ||
+    !proposal.snapshotFetchedAt ||
+    !proposal.model ||
+    !proposal.candidateKind ||
+    !proposal.candidateKey ||
+    (proposal.executionMode !== "paper" && proposal.executionMode !== "live")
+  ) return false;
   const sourceAt = Date.parse(proposal.snapshotFetchedAt);
   const currentAt = Date.parse(currentSnapshotFetchedAt);
   if (!Number.isFinite(sourceAt) || !Number.isFinite(currentAt)) return false;
@@ -544,4 +616,23 @@ export function isAiProposalFresh(
     proposal.fetchedAt - proposal.requestedAt > AI_RESPONSE_MAX_LATENCY_MS
   ) return false;
   return true;
+}
+
+
+/** Full live-control check: freshness + exact candidate + paper/live mode. */
+export function isAiProposalForCandidate(
+  proposal: AiProposal | null | undefined,
+  currentSnapshotFetchedAt: string,
+  now: number,
+  candidateKind: AiCandidateKind,
+  candidateKey: string,
+  executionMode: AiExecutionMode,
+  maxAgeMs: number = AI_PROPOSAL_MAX_AGE_MS,
+): boolean {
+  return (
+    isAiProposalFresh(proposal, currentSnapshotFetchedAt, now, maxAgeMs) &&
+    proposal?.candidateKind === candidateKind &&
+    proposal?.candidateKey === candidateKey &&
+    proposal?.executionMode === executionMode
+  );
 }

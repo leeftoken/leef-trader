@@ -5,7 +5,12 @@ import { loadSeedSnapshot } from "@/lib/leef/seed";
 import type { LeefSnapshot } from "@/lib/leef/types";
 import { marketEngine } from "@/lib/market/market-engine";
 import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
-import { useMarketEngine } from "@/hooks/useMarketEngine";
+import { useMarketEngineSelector } from "@/hooks/useMarketEngine";
+import type { EngineState } from "@/lib/market/market-engine";
+
+const selectSnapshot = (state: EngineState) => state.snapshot;
+const selectFetching = (state: EngineState) => state.fetching;
+const selectLastFetchAt = (state: EngineState) => state.lastFetchAt;
 
 const placeholder = unavailableSnapshot(
   "Loading the live Alcor LEEF book…",
@@ -19,7 +24,9 @@ const placeholder = unavailableSnapshot(
  * page refresh and regardless of what the component tree does.
  */
 export function useSnapshot() {
-  const engine = useMarketEngine();
+  const liveSnapshot = useMarketEngineSelector(selectSnapshot);
+  const isFetching = useMarketEngineSelector(selectFetching);
+  const lastFetchAt = useMarketEngineSelector(selectLastFetchAt);
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
 
   // Instant first paint: the build-time seed book (public/seed-snapshot.json)
@@ -37,17 +44,16 @@ export function useSnapshot() {
     };
   }, []);
 
-  const snap = engine.snapshot ?? seed ?? placeholder;
+  const snap = liveSnapshot ?? seed ?? placeholder;
   const ranked = useMemo(() => rankPools(snap.pools, snap), [snap]);
   return {
     snap,
     ranked,
     syncSec,
-    isFetching: engine.fetching,
-    dataUpdatedAt: engine.lastFetchAt,
+    isFetching,
+    dataUpdatedAt: lastFetchAt,
     refetch: () => {
       void marketEngine.forceRefresh();
     },
-    engine,
   };
 }

@@ -530,7 +530,17 @@ class MarketEngine {
         if (freshness.fresh) {
           // Same single lane for chain-spot updates: settle profit selection
           // before maintenance is allowed to inspect/spend inventory.
-          void botOnSnapshot(patchedSnap).then(() => rebalancerOnSnapshot(patchedSnap));
+          void botOnSnapshot(patchedSnap)
+            .then(() => {
+              // Match the full-market path: a bot cycle may still own the
+              // decision lane when botOnSnapshot returns early for a newer
+              // snapshot. Portfolio maintenance must not race that cycle.
+              if (!botCycleInFlight()) rebalancerOnSnapshot(patchedSnap);
+            })
+            .catch((err) => {
+              const reason = err instanceof Error ? err.message : "strategy evaluation failed";
+              useBot.getState().setLastReason(`Strategy evaluation error: ${reason}`);
+            });
         }
       } else {
         // A successful read that finds UNCHANGED state is still fresh chain

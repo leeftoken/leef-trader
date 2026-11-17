@@ -35,8 +35,9 @@ describe("aiControl (Jev execution authority)", () => {
   it("migrates any previously persisted Jev authorization back to OFF", async () => {
     const migrate = useTerminal.persist.getOptions().migrate;
     const migrated = await migrate?.({ aiControl: "control", aiEnabled: true }, 2);
-    expect((migrated as Record<string, unknown>).aiControl).toBe("off");
+    expect(migrated).not.toHaveProperty("aiControl");
     expect((migrated as Record<string, unknown>).aiEnabled).toBe(true);
+    expect(useTerminal.getState().aiControl).toBe("off");
   });
 
   it("proposal state is ephemeral and settable", () => {

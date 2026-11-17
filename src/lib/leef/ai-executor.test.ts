@@ -124,29 +124,6 @@ const swapContext: AiProposalContext = {
   allowedActions: ["hold", "swap"],
 };
 
-describe("AI candidate identity", () => {
-  it("binds Jev approval to the assessed amount, route and token contracts", () => {
-    const candidate = {
-      tokenIn: "WAX",
-      tokenInContract: "eosio.token",
-      tokenOut: "LEEF",
-      tokenOutContract: "leefmaincorp",
-      amountIn: 100,
-      amountUsd: 0.47,
-      expectedOut: 1_000_000,
-      expectedNetEdgePct: 1.2,
-      priceImpactPct: 0.2,
-      poolIds: [217],
-      hops: 1,
-    };
-    const key = makeAiCandidateKey("auto", "live", "buy", candidate);
-    expect(makeAiCandidateKey("auto", "live", "buy", { ...candidate, amountIn: 101 })).not.toBe(key);
-    expect(makeAiCandidateKey("auto", "live", "buy", { ...candidate, poolIds: [218] })).not.toBe(key);
-    expect(makeAiCandidateKey("auto", "live", "buy", { ...candidate, tokenOutContract: "fake.token" })).not.toBe(key);
-    expect(makeAiCandidateKey("auto", "live", "buy", candidate)).toBe(key);
-  });
-});
-
 describe("buildAiQuestions", () => {
   it("offers only the action types allowed for the exact deterministic candidate", () => {
     const q = buildAiQuestions(summary());

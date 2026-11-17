@@ -201,8 +201,8 @@ async function requestAiControlProposal(
   if (import.meta.env.MODE === "test") {
     return { proposal: null, error: "Jev requests are disabled in tests" };
   }
-  if (mode !== "live" || snap.source !== "live") {
-    return { proposal: null, error: "CONTROL requires a live wallet and live market snapshot" };
+  if (snap.source !== "live") {
+    return { proposal: null, error: "CONTROL requires a live market snapshot" };
   }
 
   const summary = aiSummaryOf(snap, b, balances, candidateKind, candidateKey, candidateDetails);
@@ -858,12 +858,12 @@ async function runBotOnceInner(
   // at its execution gate. SUGGEST remains background/non-blocking.
   let controlProposalPromise: Promise<AiControlRequestResult> | null = null;
   const aiModeAtCandidate = useTerminal.getState().aiControl;
-  if (aiModeAtCandidate === "control" && candidateKind !== "other") {
+  if (!opts?.dry && aiModeAtCandidate === "control" && candidateKind !== "other") {
     useTerminal.getState().setAiProposal(null);
     controlProposalPromise = requestAiControlProposal(
       snap, b, balances, mode, candidateKind, candidateKey, candidateDetails,
     );
-  } else {
+  } else if (!opts?.dry) {
     maybeKickAiPoll(snap, b, balances, mode, candidateKind, candidateKey, candidateDetails);
   }
 

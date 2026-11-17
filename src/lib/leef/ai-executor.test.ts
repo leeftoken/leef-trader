@@ -252,7 +252,7 @@ describe("parseAiProposal", () => {
       [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.98 },
       [AI_QID.sizeBucket]: { type: "choice", choice: "half", confidence: 0.98 },
       [AI_QID.riskStress]: { type: "noul", noul: 0.2 },
-      [AI_QID.riskExecute]: { type: "noul", noul: 0.8 },
+      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
     }), context);
     expect(p).not.toBeNull();
     expect(p!.confidence).toBeCloseTo(0.8, 10);

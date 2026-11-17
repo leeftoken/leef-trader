@@ -64,6 +64,7 @@ async function runJevDryRun(summary: AiSnapshotSummary): Promise<DryRun> {
     requestedAt: at,
     receivedAt,
     model: res.model,
+    executionMode: summary.executionMode,
     candidateKind: summary.candidateKind,
     candidateKey: summary.candidateKey,
     candidate: summary.candidate,
@@ -149,7 +150,15 @@ export function AiExecPanel({ snap }: { snap: LeefSnapshot }) {
     setBusy(true);
     try {
       const run = await runJevDryRun(
-        aiSummaryOf(snap, useBot.getState(), useWallet.getState().balances(), "preview", "dry-run"),
+        aiSummaryOf(
+          snap,
+          useBot.getState(),
+          useWallet.getState().balances(),
+          "preview",
+          "dry-run",
+          {},
+          useWallet.getState().canSign() ? "live" : "paper",
+        ),
       );
       setRuns((prev) => [run, ...prev].slice(0, 20));
     } finally {

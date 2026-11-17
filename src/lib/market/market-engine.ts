@@ -149,6 +149,66 @@ const BLOCK_STALL_MS = 20_000;
 /** Gap after which a wake/resume forces a full resync. */
 const RESUME_GAP_FACTOR = 2.5;
 
+export function patchOnchainPools(
+  snap: LeefSnapshot,
+  rows: Map<number, OnchainPool>,
+  dropInvalid: boolean,
+): { nextLeef: LeefPool[]; nextAux: AuxPool[]; changed: number } {
+  const leefById = new Map(snap.pools.map((p) => [p.id, p]));
+  const auxById = new Map(snap.aux.map((p) => [p.id, p]));
+  let changed = 0;
+  const nextLeef: LeefPool[] = [...snap.pools];
+  const nextAux: AuxPool[] = [...snap.aux];
+  for (const [id, oc] of rows) {
+    const leef = leefById.get(id);
+    if (leef) {
+      const differs = onchainDiffers(
+        {
+          sqrtPriceX64: leef.sqrtPriceX64,
+          liquidity: leef.liquidity,
+          qtyA: leef.leefIsA ? leef.leef.quantity : leef.pair.quantity,
+          qtyB: leef.leefIsA ? leef.pair.quantity : leef.leef.quantity,
+        },
+        oc,
+      );
+      if (!differs) continue;
+      const patched = applyOnchainToLeefPool(leef, oc);
+      const idx = nextLeef.findIndex((p) => p.id === id);
+      if (patched && idx >= 0) {
+        nextLeef[idx] = patched;
+        changed += 1;
+      } else if (idx >= 0 && dropInvalid) {
+        nextLeef.splice(idx, 1);
+        changed += 1;
+      }
+      continue;
+    }
+
+    const aux = auxById.get(id);
+    if (!aux) continue;
+    const differs = onchainDiffers(
+      {
+        sqrtPriceX64: aux.sqrtPriceX64,
+        liquidity: aux.liquidity ?? "0",
+        qtyA: aux.tokenA.quantity,
+        qtyB: aux.tokenB.quantity,
+      },
+      oc,
+    );
+    if (!differs) continue;
+    const patched = applyOnchainToAuxPool(aux, oc);
+    const idx = nextAux.findIndex((p) => p.id === id);
+    if (patched && idx >= 0) {
+      nextAux[idx] = patched;
+      changed += 1;
+    } else if (idx >= 0 && dropInvalid) {
+      nextAux.splice(idx, 1);
+      changed += 1;
+    }
+  }
+  return { nextLeef, nextAux, changed };
+}
+
 class MarketEngine {
   private state: EngineState = initialState();
   private listeners = new Set<() => void>();
@@ -311,7 +371,7 @@ class MarketEngine {
         const snap = await getLeefSnapshot();
         cycle.marketMs = Date.now() - tM;
         const alcorOk = snap.source === "live";
-        const changedPoolIds = routeCache.notePools(snap.pools);
+        const changedPoolIds = routeCache.notePools([...snap.pools, ...snap.aux]);
         if (changedPoolIds.length > 0) {
           marketBus.emit("pools", { changedIds: changedPoolIds, headBlock: this.state.headBlock });
         }
@@ -421,7 +481,7 @@ class MarketEngine {
           });
         }
       }
-      const patched = this.patchPools(snap, rows, true);
+      const patched = patchOnchainPools(snap, rows, true);
       const changed = patched.changed;
       const nextLeef = patched.nextLeef;
       const nextAux = patched.nextAux;
@@ -429,7 +489,7 @@ class MarketEngine {
         // Recompute USD prices over the patched book (trusted-stable oracle
         // included) — this is what makes prices move BETWEEN API pulls.
         const px = attachUsdPrices(nextLeef, nextAux, snap.waxUsd, undefined);
-        const changedIds = routeCache.notePools(nextLeef);
+        const changedIds = routeCache.notePools([...nextLeef, ...nextAux]);
         const patchedSnap: LeefSnapshot = {
           ...snap,
           pools: nextLeef,
@@ -487,54 +547,6 @@ class MarketEngine {
     return hotPoolIds(snap);
   }
 
-  /**
-   * Apply fresh on-chain rows (table reads OR logswap checkpoints) to the
-   * snapshot's pool arrays. `dropInvalid` (table truth only) removes delisted
-   * pools; checkpoints never remove — a swap just proved the pool is live.
-   */
-  private patchPools(
-    snap: LeefSnapshot,
-    rows: Map<number, OnchainPool>,
-    dropInvalid: boolean,
-  ): { nextLeef: LeefPool[]; nextAux: AuxPool[]; changed: number } {
-    const leefById = new Map(snap.pools.map((p) => [p.id, p]));
-    const auxById = new Map(snap.aux.map((p) => [p.id, p]));
-    let changed = 0;
-    const nextLeef: LeefPool[] = [...snap.pools];
-    const nextAux: AuxPool[] = [...snap.aux];
-    for (const [id, oc] of rows) {
-      const leef = leefById.get(id);
-      if (leef) {
-        const differs = onchainDiffers(
-          {
-            sqrtPriceX64: leef.sqrtPriceX64,
-            liquidity: leef.liquidity,
-            qtyA: leef.leefIsA ? leef.leef.quantity : leef.pair.quantity,
-            qtyB: leef.leefIsA ? leef.pair.quantity : leef.leef.quantity,
-          },
-          oc,
-        );
-        if (!differs) continue;
-        const patched = applyOnchainToLeefPool(leef, oc);
-        const idx = nextLeef.findIndex((p) => p.id === id);
-        if (patched && idx >= 0) {
-          nextLeef[idx] = patched;
-          changed += 1;
-        } else if (idx >= 0 && dropInvalid) {
-          nextLeef.splice(idx, 1); // pool delisted on-chain
-          changed += 1;
-        }
-        continue;
-      }
-      const aux = auxById.get(id);
-      if (aux) {
-        const patched = applyOnchainToAuxPool(aux, oc);
-        const idx = nextAux.findIndex((p) => p.id === id);
-        if (patched && idx >= 0) nextAux[idx] = patched;
-      }
-    }
-    return { nextLeef, nextAux, changed };
-  }
 
   /* ------------------- swap flow (E-1 logswap stream) --------------- */
 
@@ -564,7 +576,7 @@ class MarketEngine {
     const cps = latestCheckpoints(fresh, snap, this.hotPoolIds(snap));
     if (cps.length === 0) return;
     swapFlow.noteCheckpoints(cps);
-    const { nextLeef, nextAux, changed } = this.patchPools(
+    const { nextLeef, nextAux, changed } = patchOnchainPools(
       snap,
       new Map(cps.map((c) => [c.id, c])),
       false,

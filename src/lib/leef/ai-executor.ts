@@ -88,6 +88,29 @@ const AI_ACTIONS: AiAction[] = ["hold", "buy", "swap"];
 
 export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
+/**
+ * Stable identity for the exact deterministic candidate Jev is judging.
+ * Amount is part of identity: a judgement over a smaller/larger notional
+ * must never authorize a different candidate merely because the route stayed
+ * the same. Twelve significant digits preserve WAX asset precision while
+ * avoiding insignificant floating-point formatting differences.
+ */
+export function aiCandidateKeyOf(input: {
+  strategy: string;
+  kind: "buy" | "swap";
+  tokenIn: string;
+  tokenInContract: string;
+  tokenOut: string;
+  tokenOutContract: string;
+  routeKey: string;
+  amountIn: number;
+}): string {
+  const amount = Number.isFinite(input.amountIn) && input.amountIn > 0
+    ? input.amountIn.toPrecision(12)
+    : "invalid";
+  return `${input.strategy}:${input.kind}:${input.tokenIn}@${input.tokenInContract}:${input.tokenOut}@${input.tokenOutContract}:${input.routeKey}:in:${amount}`;
+}
+
 /** Terse market/account summary sent as Jev state. No secrets, keys or memos. */
 export interface AiSnapshotSummary {
   waxUsd: number;

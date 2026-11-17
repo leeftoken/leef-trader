@@ -26,6 +26,12 @@ describe("aiControl (Jev execution authority)", () => {
     expect(useTerminal.getState().aiControl).toBe("off");
   });
 
+  it("does not persist Jev CONTROL authorization across browser reloads", () => {
+    const partialize = useTerminal.persist.getOptions().partialize;
+    const persisted = partialize?.(useTerminal.getState()) as Record<string, unknown> | undefined;
+    expect(persisted).not.toHaveProperty("aiControl");
+  });
+
   it("proposal state is ephemeral and settable", () => {
     useTerminal.getState().setAiProposal(null);
     expect(useTerminal.getState().aiProposal).toBeNull();

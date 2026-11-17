@@ -4,7 +4,8 @@ import { headline } from "@/lib/leef/rank";
 import { type LeefSnapshot, type RankedPool } from "@/lib/leef/types";
 import { measureSnapshotFreshness } from "@/lib/market/snapshot-freshness";
 import type { LiveTickState } from "./use-live-tick";
-import { useMarketEngine } from "@/hooks/useMarketEngine";
+import { useMarketEngineSelector } from "@/hooks/useMarketEngine";
+import type { EngineState } from "@/lib/market/market-engine";
 import { cn } from "@/lib/utils";
 import { relTime, useNow } from "./use-now";
 import { VersionBanner } from "./version-banner";
@@ -12,6 +13,16 @@ import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
 import { useAiControl } from "./ai-control";
 import { liveCapitalBlocked, pendingTxid, tradePhase, unknownBlockReason } from "@/lib/wallet/trade-cycle";
 import { Button } from "@/components/ui/button";
+
+const selectHeadBlock = (state: EngineState) => state.headBlock;
+const selectHeadBlockAt = (state: EngineState) => state.headBlockAt;
+const selectBestRpcUrl = (state: EngineState) => state.rpc[0]?.url ?? null;
+const selectBestRpcLatency = (state: EngineState) => state.rpc[0]?.latencyMs ?? null;
+const selectSignerMode = (state: EngineState) => state.signer.mode;
+const selectSignerReady = (state: EngineState) => state.signer.ready;
+const selectSignerAuthType = (state: EngineState) => state.signer.authType;
+const selectAutoTradeBot = (state: EngineState) => state.autoTrade.bot;
+const selectAutoTradePhase = (state: EngineState) => state.autoTrade.phase;
 
 export function StatusBar({
   snap,
@@ -24,7 +35,15 @@ export function StatusBar({
 }) {
   // Live infra pulse (head block age etc.) between engine commits.
   const now = useNow();
-  const engine = useMarketEngine();
+  const headBlock = useMarketEngineSelector(selectHeadBlock);
+  const headBlockAt = useMarketEngineSelector(selectHeadBlockAt);
+  const bestRpcUrl = useMarketEngineSelector(selectBestRpcUrl);
+  const bestRpcLatency = useMarketEngineSelector(selectBestRpcLatency);
+  const signerMode = useMarketEngineSelector(selectSignerMode);
+  const signerReady = useMarketEngineSelector(selectSignerReady);
+  const signerAuthType = useMarketEngineSelector(selectSignerAuthType);
+  const autoTradeBot = useMarketEngineSelector(selectAutoTradeBot);
+  const autoTradePhase = useMarketEngineSelector(selectAutoTradePhase);
   const setTab = useTerminal((s) => s.setTab);
   const syncSec = useTerminal((s) => s.syncSec);
   const aiEnabled = useTerminal((s) => s.aiEnabled);
@@ -53,10 +72,10 @@ export function StatusBar({
   const marketDataTone =
     marketDataState === "LIVE" ? "text-leef" : "text-warn";
   const blockAgeSec =
-    engine.headBlockAt > 0 ? Math.max(0, (now - engine.headBlockAt) / 1000) : null;
+    headBlockAt > 0 ? Math.max(0, (now - headBlockAt) / 1000) : null;
   const blockFresh = blockAgeSec != null && blockAgeSec < 5;
-  const bestRpc = engine.rpc[0];
-  const spotAgeMs = engine.snapshot?.spotAt ? now - Date.parse(engine.snapshot.spotAt) : null;
+  const bestRpc = (bestRpcUrl ? { url: bestRpcUrl, latencyMs: bestRpcLatency } : null);
+  const spotAgeMs = snap.spotAt ? now - Date.parse(engine.snapshot.spotAt) : null;
   const spotFresh = spotAgeMs != null && Number.isFinite(spotAgeMs) && spotAgeMs >= 0 && spotAgeMs < 30_000;
   const route = tick.bestRoute;
   const conversion = route && route.amountIn > 0 ? route.amountOut / route.amountIn : 0;
@@ -151,15 +170,15 @@ export function StatusBar({
           <span
             className="font-mono"
             title={
-              engine.signer.mode === "live"
-                ? `Signer ready (${engine.signer.authType ?? "wallet"}) — market updates never re-import it`
+              signerMode === "live"
+                ? `Signer ready (${signerAuthType ?? "wallet"}) — market updates never re-import it`
                 : "Paper mode — no signer"
             }
           >
-            <span className={engine.signer.ready ? "text-leef" : "text-subtle"}>●</span>{" "}
+            <span className={signerReady ? "text-leef" : "text-subtle"}>●</span>{" "}
             {engine.signer.mode === "live" ? "signer" : "paper"}
           </span>
-          <span className="font-mono" title={`Auto trade ${engine.autoTrade.bot ? "active" : "off"} · phase ${engine.autoTrade.phase}`}>
+          <span className="font-mono" title={`Auto trade ${autoTradeBot ? "active" : "off"} · phase ${autoTradePhase}`}>
             <span className={engine.autoTrade.bot ? "text-leef" : "text-subtle"}>●</span>{" "}
             {engine.autoTrade.bot ? "auto" : "idle"}
           </span>

@@ -3,7 +3,7 @@ import { useTerminal } from "@/store/terminal";
 
 /**
  * AI execution-authority hook over the terminal store contract:
- *   aiControl: "off" | "suggest" | "control"  (persisted, default "off")
+ *   aiControl: "off" | "suggest" | "control"  (session-only, default "off")
  *   setAiControl(mode, confirmed?) -> boolean
  *     ("control" is REFUSED — returns false — unless confirmed === true,
  *      i.e. the UI risk dialog; leaving "control" never needs it)
@@ -34,7 +34,7 @@ function setFallbackMode(m: AiControlMode) {
 
 export function useAiControl(): {
   mode: AiControlMode;
-  /** True when CORE's persisted store contract is live (vs local fallback). */
+  /** True when CORE's store contract is live (vs local fallback). */
   persisted: boolean;
   /** Returns whether the mode was applied — false = store refused it. */
   setMode: (mode: AiControlMode, confirmed?: boolean) => boolean;

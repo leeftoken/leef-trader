@@ -129,7 +129,7 @@ export function assessUnknownExecution(
     const predEdgePct = entry.predEdgePct == null
       ? previous?.predEdgePct
       : previous
-        ? ((previous.predEdgePct ?? entry.predEdgePct) * previous.entryWax +
+        ? ((previous.predEdgePct ?? entry.predEdgePct) * (previous.entryWax ?? 0) +
             entry.predEdgePct * amountIn) / Math.max(totalQuoteSpent, 1e-12)
         : entry.predEdgePct;
     const nextPosition: Position = {

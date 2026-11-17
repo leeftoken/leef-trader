@@ -33,6 +33,15 @@ Decision kinds: `buy` (sized entry with edge verdict), `sell` (exit),
 `arb` (atomic plan), `hold` (do nothing — a successful outcome), `stop`
 (session goal / drawdown reached).
 
+## Desk preview parity
+
+The desk's dry-run preview uses wall-clock quote freshness and the same
+third-party flow states and persisted echo-cost budget as the live evaluator.
+A previewed candidate is still subject to any later execution-only gates,
+including Jev CONTROL approval, exact venue quotes, resource checks and the
+shared live-capital recovery lock. A preview is not a promise that an order
+will be submitted.
+
 ## Opportunity dedup
 
 - The bot is single-flight: one trade in flight, then a cooldown

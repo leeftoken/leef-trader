@@ -79,7 +79,7 @@ describe("Auto strategy WAX micro fallback", () => {
         operationalReserveUsd: 0,
       },
       position: null,
-      gridAnchor: snap.leefUsd,
+      gridAnchor: null,
       balances: { WAX: 50 },
       cooldownUntil: 0,
       tradesThisHour: 0,

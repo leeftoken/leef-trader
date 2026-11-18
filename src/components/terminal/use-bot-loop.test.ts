@@ -49,3 +49,17 @@ describe("HOLD-reason surfacing dedupe", () => {
     }
   });
 });
+
+
+describe("unknown recovery phase guard", () => {
+  it("only resumes after a transaction is genuinely unknown", async () => {
+    const { shouldResumeUnknownTradeRecovery } = await import("./use-bot-loop");
+    expect(shouldResumeUnknownTradeRecovery("unknown")).toBe(true);
+    expect(shouldResumeUnknownTradeRecovery("signing")).toBe(false);
+    expect(shouldResumeUnknownTradeRecovery("broadcasted")).toBe(false);
+    expect(shouldResumeUnknownTradeRecovery("reconciling")).toBe(false);
+    expect(shouldResumeUnknownTradeRecovery("confirmed")).toBe(false);
+    expect(shouldResumeUnknownTradeRecovery("failed")).toBe(false);
+    expect(shouldResumeUnknownTradeRecovery("idle")).toBe(false);
+  });
+});

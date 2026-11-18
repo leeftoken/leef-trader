@@ -21,6 +21,7 @@ export type RecoveryAssessment =
       action: "buy" | "sell" | "swap" | "arb";
       actualIn: number;
       actualOut: number;
+      recoveredPnlUsd?: number;
       nextPosition: Position | null;
       note: string;
     }
@@ -44,6 +45,7 @@ function externalTransferAmount(
   account: string,
   token: TokenMeta,
   direction: "out" | "in",
+  counterparty?: string,
 ): number {
   return transfers.reduce((total, transfer) => {
     if (
@@ -51,8 +53,8 @@ function externalTransferAmount(
       transfer.contract.toLowerCase() !== token.contract.toLowerCase()
     ) return total;
     const matches = direction === "out"
-      ? transfer.from === account && transfer.to !== account
-      : transfer.to === account && transfer.from !== account;
+      ? transfer.from === account && (counterparty ? transfer.to === counterparty : transfer.to !== account)
+      : transfer.to === account && (counterparty ? transfer.from === counterparty : transfer.from !== account);
     return matches ? total + transfer.amount : total;
   }, 0);
 }
@@ -206,24 +208,128 @@ export function assessUnknownExecution(
     if (!sameToken(input, output)) {
       return { ok: false, reason: "The saved arbitrage record does not use one quote token on both legs." };
     }
-    const grossQuoteSent = externalTransferAmount(transfers, context.account, input, "out");
-    const grossQuoteReceived = externalTransferAmount(transfers, context.account, input, "in");
+
+    // Alcor atomic arb may contain several exact-in transfers per side when
+    // the route is split across pools. Match the journal's quoteIn against
+    // only account<->swap.alcor transfers; the separate smart.ass platform
+    // fee is a real wallet debit but is not part of the swap input.
+    const grossQuoteSent = externalTransferAmount(
+      transfers, context.account, input, "out", "swap.alcor",
+    );
+    const grossQuoteReceived = externalTransferAmount(
+      transfers, context.account, input, "in", "swap.alcor",
+    );
     if (
       !matchesExactDebit(-grossQuoteSent, amountIn, input.decimals) ||
       grossQuoteReceived <= 0
     ) {
-      return { ok: false, reason: "The arbitrage must prove the exact gross quote-token debit and a positive quote-token receipt." };
+      return { ok: false, reason: "Alcor swap legs do not prove the saved gross quote input and a positive quote-token receipt." };
     }
-    if (context.position && !positionDeltaIsZero(transfers, context.account, base)) {
-      return { ok: false, reason: "The arbitrage changed the token underlying the open bot position." };
+
+    const grossBaseBought = externalTransferAmount(
+      transfers, context.account, base, "in", "swap.alcor",
+    );
+    const grossBaseSold = externalTransferAmount(
+      transfers, context.account, base, "out", "swap.alcor",
+    );
+    if (!(grossBaseBought > 0) || !(grossBaseSold > 0)) {
+      return { ok: false, reason: "The transaction does not contain both the base-token buy and sell legs expected for an atomic arbitrage." };
     }
+
+    if (context.position && context.position.mode !== "live") {
+      return { ok: false, reason: "A paper position exists. A live arbitrage residual cannot safely be merged into it." };
+    }
+
+    // Split routes can legitimately leave a residual base-token inventory.
+    // Reconstruct it from gross base bought/sold and allocate the original
+    // quote cost pro-rata. Never use router estimates as fills.
+    const baseDelta = grossBaseBought - grossBaseSold;
+    const rawUnit = 1 / 10 ** base.decimals;
+    const quoteUsd = Number.isFinite(entry.sizeUsd) && (entry.sizeUsd ?? 0) > 0
+      ? entry.sizeUsd! / amountIn
+      : Number.isFinite(entry.waxUsd) && (entry.waxUsd ?? 0) > 0
+        ? entry.waxUsd!
+        : null;
+    const feeAmount = transfers.reduce((sum, transfer) => {
+      const isPlatformFee =
+        transfer.from === context.account &&
+        transfer.to !== "swap.alcor" &&
+        transfer.symbol === input.symbol &&
+        transfer.contract.toLowerCase() === input.contract.toLowerCase() &&
+        /leef-trader platform fee/i.test(transfer.memo);
+      return sum + (isPlatformFee ? transfer.amount : 0);
+    }, 0);
+
+    const previous = context.position;
+    const buyCostUsd = quoteUsd == null ? null : grossQuoteSent * quoteUsd;
+    const feeCostUsd = quoteUsd == null ? null : feeAmount * quoteUsd;
+    let nextPosition: Position | null = previous;
+    let realizedCostUsd = buyCostUsd;
+    let residualQuote = 0;
+    let residualCostUsd = 0;
+
+    if (baseDelta > rawUnit) {
+      residualQuote = grossQuoteSent * (baseDelta / grossBaseBought);
+      residualCostUsd = (buyCostUsd ?? 0) * (baseDelta / grossBaseBought);
+      const totalAmount = (previous?.amountLeef ?? 0) + baseDelta;
+      const totalCostUsd = (previous?.entryCostUsd ?? 0) + residualCostUsd;
+      const totalQuote = (previous?.entryWax ?? 0) + residualQuote;
+      const entryUsd = totalCostUsd / Math.max(totalAmount, 1e-12);
+      const markUsd = entry.leefUsd != null && entry.leefUsd > 0 ? entry.leefUsd : entryUsd;
+      nextPosition = {
+        amountLeef: totalAmount,
+        entryUsd,
+        entryCostUsd: totalCostUsd,
+        entryWax: totalQuote,
+        since: previous?.since ?? entry.ts,
+        highUsd: Math.max(previous?.highUsd ?? 0, markUsd),
+        mode: "live",
+        predEdgePct: previous?.predEdgePct ?? entry.predEdgePct,
+        strategy: previous?.strategy ?? context.strategy,
+      };
+      realizedCostUsd = buyCostUsd == null
+        ? null
+        : buyCostUsd - residualCostUsd;
+    } else if (baseDelta < -rawUnit) {
+      const soldFromExisting = -baseDelta;
+      if (!previous || previous.mode !== "live" || previous.amountLeef + rawUnit < soldFromExisting) {
+        return { ok: false, reason: "The arbitrage consumed more base tokens than it bought, but the saved live position cannot cover the difference." };
+      }
+      const existingCostSold = previous.entryCostUsd * (soldFromExisting / previous.amountLeef);
+      const remainingAmount = Math.max(0, previous.amountLeef - soldFromExisting);
+      const remainingCost = Math.max(0, previous.entryCostUsd - existingCostSold);
+      const remainingQuote = previous.entryWax * (remainingAmount / previous.amountLeef);
+      nextPosition = remainingAmount <= rawUnit
+        ? null
+        : {
+            ...previous,
+            amountLeef: remainingAmount,
+            entryCostUsd: remainingCost,
+            entryWax: remainingQuote,
+            entryUsd: remainingCost / remainingAmount,
+          };
+      realizedCostUsd = buyCostUsd == null ? null : buyCostUsd + existingCostSold;
+    } else {
+      nextPosition = previous;
+      realizedCostUsd = buyCostUsd;
+    }
+
+    const recoveredPnlUsd =
+      quoteUsd != null && realizedCostUsd != null
+        ? grossQuoteReceived * quoteUsd - realizedCostUsd - (feeCostUsd ?? 0)
+        : undefined;
     return {
       ok: true,
       action: "arb",
       actualIn,
       actualOut,
-      nextPosition: context.position,
-      note: "Both arbitrage quote-token transfer directions are present; the tracked base-token position is unchanged.",
+      recoveredPnlUsd: Number.isFinite(recoveredPnlUsd) ? recoveredPnlUsd : undefined,
+      nextPosition,
+      note: baseDelta > rawUnit
+        ? "Split Alcor arbitrage legs reconciled; residual base inventory and proportional cost basis were restored from actual transfers."
+        : baseDelta < -rawUnit
+          ? "Split Alcor arbitrage legs reconciled; existing base inventory was reduced by the verified net debit."
+          : "Split Alcor arbitrage legs reconciled; the base-token position is unchanged.",
     };
   }
 

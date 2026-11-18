@@ -588,7 +588,10 @@ export function pickClipInBand(minIn: number, maxIn: number, seed = Date.now()):
 export function hopsForStrategy(strategy: BotStrategy, cap: number, seed = Date.now()): number {
   const c = Math.min(10, Math.max(1, Math.floor(cap || 4)));
   const r = ((seed >>> 0) % 3) + 1;
-  if (strategy === "spread" || strategy === "volume") return Math.min(c, 2);
+  if (strategy === "spread") return Math.min(c, 2);
+  // Volume may use a three-pool path through the LEEF network, but stays
+  // bounded by the user's cap and exact venue/economic gates.
+  if (strategy === "volume") return Math.min(c, 3);
   if (strategy === "unleashed")
     return Math.min(c, Math.max(2, r + 1));
   if (strategy === "growth") return hopsForGrowth("balanced", c);

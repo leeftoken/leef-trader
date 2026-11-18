@@ -78,6 +78,7 @@ import {
   markConfirmed,
   markFailed,
   markUnknown,
+  markTradeStateApplied,
   pendingTxid,
   tradeAccount,
   tradeIntent as persistedTradeIntent,
@@ -534,9 +535,15 @@ async function releaseBotCapitalAfterJournal(
   }
 
   markUnknown(txid);
-  // Recreate only a pending row from the persisted non-secret intent when the
-  // journal write was lost. Recovery still requires exact chain transfers.
-  await ensureUnknownExecutionJournal(txid, persistedTradeIntent());
+  // Recreate from the persisted intent only after distinguishing whether bot
+  // state was already applied. A stateApplied intent restores a confirmed
+  // row and can release here without running the position mutation twice.
+  const intent = persistedTradeIntent();
+  const restored = await ensureUnknownExecutionJournal(txid, intent);
+  if (restored && intent?.stateApplied) {
+    markConfirmed(txid);
+    return true;
+  }
   return false;
 }
 
@@ -877,10 +884,11 @@ async function ensureUnknownExecutionJournal(
   txid: string,
   intent: BotTradeIntent | undefined,
 ): Promise<boolean> {
+  const desiredStatus = intent?.stateApplied ? "confirmed" : "unknown";
   const matches = (await journalAll()).filter(
     (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
   );
-  if (matches.length === 1) return true;
+  if (matches.length === 1) return matches[0]?.status === desiredStatus;
   if (matches.length !== 0 || !intent) return false;
 
   journal({
@@ -893,7 +901,7 @@ async function ensureUnknownExecutionJournal(
     amountIn: intent.amountIn,
     expectedOut: intent.expectedOut,
     txid,
-    status: "unknown",
+    status: desiredStatus,
     sizeUsd: intent.sizeUsd,
     predEdgePct: intent.predEdgePct,
     poolIds: intent.poolIds,
@@ -901,13 +909,15 @@ async function ensureUnknownExecutionJournal(
     venues: intent.venues,
     leefUsd: intent.leefUsd,
     waxUsd: intent.waxUsd,
-    reason: "Restored unresolved execution metadata from the persisted bot signing intent after reload",
+    reason: intent.stateApplied
+      ? "Restored confirmed execution metadata; bot position/statistics were already persisted before reload"
+      : "Restored unresolved execution metadata from the persisted bot signing intent after reload",
   });
 
   const restored = (await journalAll()).filter(
     (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
   );
-  return restored.length === 1 && restored[0]?.status === "unknown";
+  return restored.length === 1 && restored[0]?.status === desiredStatus;
 }
 
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
@@ -939,8 +949,18 @@ export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string):
         );
         return;
       }
-      // pollUnknown still requires exact on-chain transfer evidence and
-      // idempotent position/journal reconciliation before it releases capital.
+      if (intent?.stateApplied) {
+        // The exact transfer was validated and bot state persisted before the
+        // crash. The unique confirmed journal row is now restored; do not add
+        // the same fill to the position a second time.
+        markConfirmed(txid);
+        bot.setLastReason(
+          `Recovered final settlement for ${txid.slice(0, 10)}…; bot state and confirmed journal row were already applied. Live capital is released.`,
+        );
+        return;
+      }
+      // Otherwise, the fill may have landed before bot state was updated. The
+      // read-only recovery validates transfers and applies the position once.
       pollUnknown(txid, context);
     })
     .catch((error) => {

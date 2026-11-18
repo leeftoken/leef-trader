@@ -74,14 +74,106 @@ export const emptyTimings = (): CycleTimings => ({
   rejectedCandidates: 0,
 });
 
+export type BotTradeIntent = {
+  action: "buy" | "sell" | "swap" | "arb";
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: number;
+  expectedOut: number;
+  sizeUsd: number;
+  strategy: string;
+  base: string;
+  quote: string;
+  leefUsd: number;
+  waxUsd: number;
+  predEdgePct?: number;
+  poolIds?: number[];
+  hops?: number;
+  venues?: string[];
+};
+
 type Lock = {
   phase: TradePhase;
   txid?: string;
   account?: string;
+  intent?: BotTradeIntent;
   since: number;
   /** Why a txid-less blocked lock exists; corrupt storage is never user-clearable. */
   blockedCause?: "interrupted-signing" | "corrupt-storage";
 };
+
+function validText(value: unknown, maxLength = 128): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+}
+
+/** Accept only the small, non-secret candidate fields needed for safe reload recovery. */
+function normalizeTradeIntent(value: unknown): BotTradeIntent | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  if (
+    (v.action !== "buy" && v.action !== "sell" && v.action !== "swap" && v.action !== "arb") ||
+    !validText(v.tokenIn, 128) ||
+    !validText(v.tokenOut, 128) ||
+    !validText(v.strategy, 64) ||
+    !validText(v.base, 64) ||
+    !validText(v.quote, 64)
+  ) return undefined;
+
+  const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  if (
+    !finite(v.amountIn) || v.amountIn <= 0 ||
+    !finite(v.expectedOut) || v.expectedOut <= 0 ||
+    !finite(v.sizeUsd) || v.sizeUsd < 0 ||
+    !finite(v.leefUsd) || v.leefUsd < 0 ||
+    !finite(v.waxUsd) || v.waxUsd < 0
+  ) return undefined;
+
+  const intent: BotTradeIntent = {
+    action: v.action,
+    tokenIn: v.tokenIn.trim(),
+    tokenOut: v.tokenOut.trim(),
+    amountIn: v.amountIn,
+    expectedOut: v.expectedOut,
+    sizeUsd: v.sizeUsd,
+    strategy: v.strategy.trim(),
+    base: v.base.trim(),
+    quote: v.quote.trim(),
+    leefUsd: v.leefUsd,
+    waxUsd: v.waxUsd,
+  };
+  if (v.predEdgePct !== undefined) {
+    if (!finite(v.predEdgePct)) return undefined;
+    intent.predEdgePct = v.predEdgePct;
+  }
+  if (v.poolIds !== undefined) {
+    if (
+      !Array.isArray(v.poolIds) ||
+      v.poolIds.length > 16 ||
+      !v.poolIds.every((id) => Number.isInteger(id) && (id as number) >= 0)
+    ) return undefined;
+    intent.poolIds = [...v.poolIds] as number[];
+  }
+  if (v.hops !== undefined) {
+    if (!Number.isInteger(v.hops) || (v.hops as number) < 1 || (v.hops as number) > 10) {
+      return undefined;
+    }
+    intent.hops = v.hops as number;
+  }
+  if (v.venues !== undefined) {
+    if (
+      !Array.isArray(v.venues) ||
+      v.venues.length > 16 ||
+      !v.venues.every((venue) => validText(venue, 64))
+    ) return undefined;
+    intent.venues = v.venues.map((venue) => (venue as string).trim());
+  }
+  return intent;
+}
+
+function savedIntent(saved: Partial<Lock>): Pick<Lock, "intent"> {
+  const intent = normalizeTradeIntent(saved.intent);
+  return intent ? { intent } : {};
+}
 
 export const TRADE_CYCLE_STORAGE_KEY = "leef-live-capital-lock-v1";
 
@@ -99,6 +191,7 @@ function readSavedLock(): Lock {
         phase: "unknown",
         txid: saved.txid,
         ...(typeof saved.account === "string" && saved.account ? { account: saved.account } : {}),
+        ...savedIntent(saved),
         since: saved.since,
       };
     }
@@ -110,6 +203,7 @@ function readSavedLock(): Lock {
     return {
       phase: "blocked",
       ...(typeof saved.account === "string" && saved.account ? { account: saved.account } : {}),
+      ...savedIntent(saved),
       since: saved.since,
       blockedCause,
     };
@@ -161,6 +255,11 @@ export function tradeAccount(): string | undefined {
   return lock.account;
 }
 
+/** Non-secret candidate metadata persisted for safe read-only recovery after reload. */
+export function tradeIntent(): BotTradeIntent | undefined {
+  return lock.intent;
+}
+
 /** True when a new LIVE transaction must not be submitted. */
 export function liveCapitalBlocked(): boolean {
   return (
@@ -172,11 +271,13 @@ export function liveCapitalBlocked(): boolean {
   );
 }
 
-export function beginSigning(account?: string): boolean {
+export function beginSigning(account?: string, intent?: BotTradeIntent): boolean {
   if (liveCapitalBlocked()) return false;
+  const normalizedIntent = normalizeTradeIntent(intent);
   lock = {
     phase: "signing",
     ...(account?.trim() ? { account: account.trim() } : {}),
+    ...(normalizedIntent ? { intent: normalizedIntent } : {}),
     since: Date.now(),
   };
   persistLock(lock);
@@ -191,6 +292,7 @@ export function markBroadcast(txid: string): void {
     phase: "broadcasted",
     txid,
     ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
     since: Date.now(),
   };
   persistLock(lock);
@@ -202,6 +304,7 @@ export function markInterruptedSigning(): void {
   lock = {
     phase: "blocked",
     ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
     since: lock.since,
     blockedCause: "interrupted-signing",
   };
@@ -209,7 +312,13 @@ export function markInterruptedSigning(): void {
 }
 
 export function markReconciling(txid: string): void {
-  lock = { phase: "reconciling", txid, ...(lock.account ? { account: lock.account } : {}), since: Date.now() };
+  lock = {
+    phase: "reconciling",
+    txid,
+    ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
+    since: Date.now(),
+  };
   persistLock(lock);
 }
 
@@ -232,7 +341,13 @@ export function markUnknown(txid: string): void {
     !(lock.phase === "broadcasted" && lock.txid === txid) &&
     !(lock.phase === "unknown" && lock.txid === txid)
   ) return;
-  lock = { phase: "unknown", txid, ...(lock.account ? { account: lock.account } : {}), since: Date.now() };
+  lock = {
+    phase: "unknown",
+    txid,
+    ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
+    since: Date.now(),
+  };
   persistLock(lock);
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planLeefTape, planNextAction, selectBestTapeClip } from "./next-action";
+import { bestRouteWithinHops, planLeefTape, planNextAction, selectBestTapeClip } from "./next-action";
+import { buildRouteGraph } from "./route-optimizer";
 import type { AuxPool, LeefPool, LeefSnapshot } from "./types";
 
 const WAX_USD = 0.02;
@@ -196,5 +197,34 @@ describe("planLeefTape", () => {
     expect(
       planLeefTape(s, { WAX: 500 }, { minUsd: 0.5, maxUsd: 0, maxLossPct: 50, seed: 1 }),
     ).toBeNull();
+  });
+});
+
+describe("bestRouteWithinHops", () => {
+  const token = (symbol: string, contract: string, quantity: number) => ({
+    symbol, contract, decimals: 8, quantity,
+  });
+  const pool = (id: number, a: ReturnType<typeof token>, b: ReturnType<typeof token>) => ({
+    id, fee: 3000, feePct: 0.3, tokenA: a, tokenB: b, tvlUsd: 10_000, volume24Usd: 1_000,
+  });
+
+  it("does not return a three-pool route when the active strategy allows only two hops", () => {
+    const graph = buildRouteGraph([], [
+      pool(501, token("WAX", "eosio.token", 100_000), token("AAA", "aaa.token", 100_000)),
+      pool(502, token("AAA", "aaa.token", 100_000), token("BBB", "bbb.token", 100_000)),
+      pool(503, token("BBB", "bbb.token", 100_000), token("LEEF", "leefmaincorp", 100_000)),
+    ]);
+    expect(bestRouteWithinHops(graph, 1, "WAX", "LEEF", 2)).toBeNull();
+  });
+
+  it("finds the same multi-pool route when three hops are allowed", () => {
+    const graph = buildRouteGraph([], [
+      pool(501, token("WAX", "eosio.token", 100_000), token("AAA", "aaa.token", 100_000)),
+      pool(502, token("AAA", "aaa.token", 100_000), token("BBB", "bbb.token", 100_000)),
+      pool(503, token("BBB", "bbb.token", 100_000), token("LEEF", "leefmaincorp", 100_000)),
+    ]);
+    const route = bestRouteWithinHops(graph, 1, "WAX", "LEEF", 3);
+    expect(route?.legs).toHaveLength(3);
+    expect(route?.poolIds).toEqual([501, 502, 503]);
   });
 });

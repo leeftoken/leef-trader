@@ -123,6 +123,10 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
 
   async function inspectPendingSettlement() {
     if (!unresolvedTxid || recoveryBusy) return;
+    if (interruptedAccount && interruptedAccount !== account) {
+      setRecoveryNotice(`This transaction belongs to ${interruptedAccount}. Switch back to that wallet before inspecting settlement.`);
+      return;
+    }
     setRecoveryBusy(true);
     setRecoveryNotice(null);
     try {
@@ -451,7 +455,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               </div>
             </div>
             {unresolvedTxid && (
-              <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
+              <Button type="button" size="sm" variant="outline" disabled={recoveryBusy || (!!interruptedAccount && interruptedAccount !== account)} onClick={() => void inspectPendingSettlement()}>
                 {recoveryBusy ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <ScanSearch className="mr-2 size-3.5" />}
                 Inspect & reconcile
               </Button>

@@ -9,11 +9,13 @@ import {
   markBroadcast,
   markConfirmed,
   markFailed,
+  markInterruptedSigning,
   markUnknown,
   pendingTxid,
   restoreTradeCycleLock,
   tradeAccount,
   tradePhase,
+  tradeStartedAt,
   unknownBlockReason,
 } from "./trade-cycle";
 
@@ -46,6 +48,19 @@ describe("live capital lock", () => {
     expect(restoreTradeCycleLock()).toBe("blocked");
     expect(liveCapitalBlocked()).toBe(true);
     expect(unknownBlockReason()).toContain("interrupted");
+  });
+
+
+  it("persists an ambiguous wallet outcome with its original account and start time", () => {
+    expect(beginSigning("leefuser")).toBe(true);
+    const startedAt = tradeStartedAt();
+
+    markInterruptedSigning();
+
+    expect(tradePhase()).toBe("blocked");
+    expect(tradeAccount()).toBe("leefuser");
+    expect(tradeStartedAt()).toBe(startedAt);
+    expect(canConfirmInterruptedSigningNoBroadcast("leefuser")).toBe(true);
   });
 
   it("releases only a txid-less interrupted lock after explicit wallet-history review", () => {

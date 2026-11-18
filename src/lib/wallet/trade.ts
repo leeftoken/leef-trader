@@ -268,19 +268,25 @@ export async function executeSwap(opts: {
       const outMeta = metaOf(opts.tokenOut, book);
       const coordinated = await coordinateCapitalMovement({
         owner: "manual",
+        account: w.account,
         submit: () =>
           signAndPushBatch({
             account: w.account,
             permission: w.permission,
             legs,
             snap: book,
+            capitalManaged: true,
           }),
         onSettled: (settled) => {
           if (settled.status !== "confirmed") return;
           const spent = assetDelta(settled.transfers, w.account, inMeta.symbol, inMeta.contract);
           const received = assetDelta(settled.transfers, w.account, outMeta.symbol, outMeta.contract);
           const exactDebit = matchesExactDebit(spent, opts.amountIn, inMeta.decimals);
-          if (!(exactDebit && received > 0)) markUnknown(settled.txid);
+          if (!(exactDebit && received > 0)) {
+            markUnknown(settled.txid);
+            return false;
+          }
+          return true;
         },
       });
       const { txid, reconciliation: rec } = coordinated;
@@ -320,6 +326,7 @@ export async function executeSwap(opts: {
     const outMeta = metaOf(opts.tokenOut, book);
     const coordinated = await coordinateCapitalMovement({
       owner: "manual",
+      account: w.account,
       submit: () =>
         signAndPushSwap({
           account: w.account,
@@ -330,6 +337,7 @@ export async function executeSwap(opts: {
           snap: book,
           // A cycle signs the venue-verified memos, not a blind re-quote.
           preQuoted,
+          capitalManaged: true,
         }),
       onSettled: (settled) => {
         if (settled.status !== "confirmed") return;
@@ -338,7 +346,11 @@ export async function executeSwap(opts: {
         const exactDebit =
           spent < 0 &&
           Math.abs(-spent - opts.amountIn) <= 1 / 10 ** inMeta.decimals + 1e-12;
-        if (!(exactDebit && received > 0)) markUnknown(settled.txid);
+        if (!(exactDebit && received > 0)) {
+          markUnknown(settled.txid);
+          return false;
+        }
+        return true;
       },
     });
     const exec = coordinated.value;

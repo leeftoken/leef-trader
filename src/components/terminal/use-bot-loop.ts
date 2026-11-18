@@ -24,6 +24,8 @@ import {
 } from "@/lib/leef/route-optimizer";
 import {
   journal,
+  journalAll,
+  settleUnknownExecution,
   journalFixture,
   setJournalCycleId,
   type MarketFixture,
@@ -65,6 +67,7 @@ import { parseAssetAmount, type AlcorRouteQuote } from "@/lib/wallet/alcor-route
 import { waxResourceBlock } from "@/lib/wallet/chain";
 import { arbFloorViolation, memoMinOutSum } from "@/lib/wallet/policy";
 import { assetDelta, matchesExactDebit, reconcileTransfersLater, waitForTransaction } from "@/lib/wallet/reconcile";
+import { assessUnknownExecution } from "@/lib/wallet/recovery";
 import { signAndPushArb, signAndPushSwap } from "@/lib/wallet/sign";
 import {
   abortSigning,
@@ -606,27 +609,129 @@ let rateLimitedUntil = 0;
 /** Evaluation mutex — paper fills and live quotes must not overlap. */
 let cycleInFlight = false;
 
-/** Read-only follow-up for an ambiguous bot transaction. */
-function pollUnknown(txid: string): void {
+type UnknownRecoveryContext = {
+  snapshot: LeefSnapshot;
+  account: string;
+  base: string;
+  quote: string;
+  strategy: ReturnType<typeof useBot.getState>["strategy"];
+};
+
+const unknownRecoveryInFlight = new Set<string>();
+
+/**
+ * Automatically finish a broadcast-unknown bot execution once history
+ * indexers expose its exact transfer trace. This is read-only: it never
+ * resubmits the swap. The lock is cleared only after the unique journal row,
+ * idempotent position update, and evidence-journal settlement all succeed.
+ */
+function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
+  if (unknownRecoveryInFlight.has(txid)) return;
+  unknownRecoveryInFlight.add(txid);
   void (async () => {
-    const rec = await reconcileTransfersLater(txid);
-    if (rec.status === "failed") {
-      // Two agreeing indexers say nothing moved; it is safe to release the lock.
-      markFailed();
-      useBot.getState().setLastReason(`Transaction ${txid.slice(0, 10)}… failed on-chain; no fill was booked.`);
-    } else if (rec.status === "confirmed" && rec.transfers.length > 0) {
-      // The original bot cycle returned before applying this fill to its
-      // in-memory position. Do not unlock and risk acting on stale position
-      // state; the persisted lock requires an explicit reconciliation path.
-      markUnknown(txid);
-      useBot.getState().setLastReason(
-        `Transaction ${txid.slice(0, 10)}… is confirmed on-chain, but bot state needs reconciliation before trading can resume.`,
+    try {
+      const rec = await reconcileTransfersLater(txid, {
+        attempts: 10,
+        delayMs: 900,
+        budgetMs: 15_000,
+      });
+      if (pendingTxid() !== txid) return;
+
+      if (rec.status === "failed") {
+        markFailed();
+        useBot.getState().setLastReason(
+          `Transaction ${txid.slice(0, 10)}… was independently confirmed failed on-chain; no fill was booked.`,
+        );
+        return;
+      }
+
+      if (rec.status !== "confirmed" || rec.transfers.length === 0) {
+        markUnknown(txid);
+        useBot.getState().setLastReason(
+          `Transaction ${txid.slice(0, 10)}… is awaiting indexed transfer evidence. Automatic read-only recovery will retry; live capital remains locked.`,
+        );
+        return;
+      }
+
+      // The execution journal write follows this call site. Give that write
+      // time to land, but never infer an execution record from chain activity.
+      let entries = await journalAll();
+      let matching = entries.filter(
+        (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
       );
-    } else {
-      markUnknown(txid);
+      for (let attempt = 0; matching.length === 0 && attempt < 5; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        entries = await journalAll();
+        matching = entries.filter(
+          (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+        );
+      }
+      if (matching.length !== 1) {
+        markUnknown(txid);
+        useBot.getState().setLastReason(
+          `Transaction ${txid.slice(0, 10)}… is confirmed, but no unique matching live execution record exists. Capital remains locked for safe review.`,
+        );
+        return;
+      }
+
+      const entry = matching[0]!;
+      const bot = useBot.getState();
+      let actualOut: number;
+      if (bot.recoveredTxids.includes(txid)) {
+        const outputMeta = entry.tokenOut ? metaOf(entry.tokenOut, context.snapshot) : null;
+        if (!outputMeta) {
+          markUnknown(txid);
+          bot.setLastReason(`Transaction ${txid.slice(0, 10)}… was partly recovered, but its output token is ambiguous. Capital remains locked.`);
+          return;
+        }
+        actualOut = assetDelta(rec.transfers, context.account, outputMeta.symbol, outputMeta.contract);
+      } else {
+        const assessment = assessUnknownExecution(entry, rec.transfers, {
+          account: context.account,
+          base: context.base,
+          quote: context.quote,
+          strategy: context.strategy,
+          position: bot.position,
+          snapshot: context.snapshot,
+        });
+        if (!assessment.ok) {
+          markUnknown(txid);
+          bot.setLastReason(
+            `Transaction ${txid.slice(0, 10)}… is confirmed, but automatic position recovery was blocked: ${assessment.reason} Capital remains locked.`,
+          );
+          return;
+        }
+        actualOut = assessment.actualOut;
+        bot.applyRecoveredExecution(txid, assessment.nextPosition);
+      }
+
+      const settled = await settleUnknownExecution(txid, actualOut);
+      if (!settled) {
+        markUnknown(txid);
+        useBot.getState().setLastReason(
+          `Transaction ${txid.slice(0, 10)}… position is reconciled, but the evidence journal is not settled. Automatic recovery will retry safely.`,
+        );
+        return;
+      }
+
+      markConfirmed();
       useBot.getState().setLastReason(
-        `Transaction ${txid.slice(0, 10)}… is still awaiting transfer evidence; live capital remains locked.`,
+        `Transaction ${txid.slice(0, 10)}… automatically reconciled from confirmed chain transfers. Live trading can resume; historical P&L was not estimated.`,
       );
+    } catch (error) {
+      if (pendingTxid() === txid) {
+        markUnknown(txid);
+        useBot.getState().setLastReason(
+          `Automatic recovery for ${txid.slice(0, 10)}… hit an inspection error: ${error instanceof Error ? error.message : "unknown error"}. Capital remains locked.`,
+        );
+      }
+    } finally {
+      unknownRecoveryInFlight.delete(txid);
+      // Keep checking while this tab is open. This timer only reads chain
+      // history; it never signs, broadcasts, or unlocks without reconciliation.
+      if (pendingTxid() === txid) {
+        setTimeout(() => pollUnknown(txid, context), 15_000);
+      }
     }
   })();
 }
@@ -1847,12 +1952,12 @@ async function runBotOnceInner(
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
-              void pollUnknown(txid);
+              void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
             }
           } else {
             markUnknown(txid);
             note = " · broadcast, transfer reconciliation pending — not retrying";
-            void pollUnknown(txid);
+            void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
           abortSigning();
@@ -2024,12 +2129,12 @@ async function runBotOnceInner(
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
-              void pollUnknown(txid);
+              void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
             }
           } else {
             markUnknown(txid);
             note = " · broadcast, transfer reconciliation pending — not retrying";
-            void pollUnknown(txid);
+            void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
           abortSigning();
@@ -2176,12 +2281,12 @@ async function runBotOnceInner(
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
-              void pollUnknown(txid);
+              void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
             }
           } else {
             markUnknown(txid);
             note = " · broadcast, transfer reconciliation pending — not retrying";
-            void pollUnknown(txid);
+            void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
           abortSigning();
@@ -2381,12 +2486,12 @@ async function runBotOnceInner(
             } else {
               markUnknown(txid);
               note = " · quote-token transfers are incomplete";
-              void pollUnknown(txid);
+              void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
             }
           } else {
             markUnknown(txid);
             note = " · broadcast, transfer reconciliation pending — not retrying";
-            void pollUnknown(txid);
+            void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
           abortSigning();

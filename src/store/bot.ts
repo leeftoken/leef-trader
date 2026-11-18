@@ -546,7 +546,13 @@ export const useBot = create<BotState>()(
               : freshStats(0),
           series: Array.isArray(p.series) ? p.series : [],
           decisions: Array.isArray(p.decisions) ? p.decisions : [],
-          riskMigrationNotice: [usd.notice, safer?.notice].filter(Boolean).join(" ") || null,
+          riskMigrationNotice: [
+            usd.notice,
+            safer?.notice,
+            waxMicroUpgrade
+              ? "WAX Micro Active profile applied to untouched defaults: 10s cooldown, 60 trades/hour, and a 1.5% per-echo loss ceiling with the existing $5 session budget."
+              : null,
+          ].filter(Boolean).join(" ") || null,
           // Forward-safe: future version bumps must not silently re-enable the
           // venue for a user who switched it off (default ON only when unset).
           neftyVenue: (p as { neftyVenue?: unknown }).neftyVenue !== false,

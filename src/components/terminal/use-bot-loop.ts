@@ -512,6 +512,35 @@ function routeIntentMeta(route: SwapRoute): Pick<BotTradeIntent, "poolIds" | "ho
   };
 }
 
+/**
+ * Release live capital only after the successful fill has updated bot state
+ * and its unique confirmed execution row is durably present in the journal.
+ * Any missing, duplicate or unsettled row keeps the matching txid locked.
+ */
+async function releaseBotCapitalAfterJournal(
+  txid: string,
+  action: BotTradeIntent["action"],
+): Promise<boolean> {
+  const rows = (await journalAll()).filter(
+    (entry) =>
+      entry.kind === "execution" &&
+      entry.mode === "live" &&
+      entry.txid === txid &&
+      entry.action === action,
+  );
+  if (rows.length === 1 && rows[0]?.status === "confirmed") {
+    markConfirmed(txid);
+    return true;
+  }
+
+  markUnknown(txid);
+  // Recreate only a pending row from the persisted non-secret intent when the
+  // journal write was lost. Recovery still requires exact chain transfers.
+  await ensureUnknownExecutionJournal(txid, persistedTradeIntent());
+  return false;
+}
+
+
 
 /**
  * Capture a route-scoped market fixture (Phase 3 market memory): just the
@@ -2150,7 +2179,6 @@ async function runBotOnceInner(
               quoteSpent = -spent;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed(txid);
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
@@ -2270,6 +2298,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "buy");
+        if (!released) {
+          const reason = "BUY transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
@@ -2360,7 +2397,6 @@ async function runBotOnceInner(
               quoteOut = actualOut;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed(txid);
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
@@ -2460,6 +2496,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "sell");
+        if (!released) {
+          const reason = "SELL transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
@@ -2545,7 +2590,6 @@ async function runBotOnceInner(
             const actualOut = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
             if (actualIn < 0 && actualOut > 0) {
               outAmt = actualOut;
-              markConfirmed(txid);
               note = " · confirmed on-chain";
               execStatus = "confirmed";
             } else {
@@ -2636,6 +2680,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "swap");
+        if (!released) {
+          const reason = "SWAP transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
@@ -2787,7 +2840,6 @@ async function runBotOnceInner(
               realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed(txid);
             } else {
               markUnknown(txid);
               note = " · quote-token transfers are incomplete";
@@ -2890,6 +2942,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: snap.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "arb");
+        if (!released) {
+          const reason = "ARB transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(book, plan.buyPool.id, "arb", plan.quoteIn * quoteMarkUsd, qSym, qSym);
       }

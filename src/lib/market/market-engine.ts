@@ -139,7 +139,7 @@ function initialState(): EngineState {
 
 const HEARTBEAT_MS = 1_500;
 /** On-chain pool spot refresh cadence (swap.alcor table reads). */
-const SPOT_EVERY_N_HEARTBEATS = 3; // ~4.5s between API pulls
+const SPOT_EVERY_N_HEARTBEATS = 2; // ~3s between chain-truth patches
 /** Swap-flow (Hyperion logswap) poll cadence — one history call per ~10s. */
 const FLOW_EVERY_N_HEARTBEATS = 7;
 /** A head block older than this (ms) means our view of the chain stalled. */

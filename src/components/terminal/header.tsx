@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { ArrowUpRight, Bot, RefreshCw, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { LazyLoginArea } from "@/components/auth/LazyLoginArea";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +13,7 @@ import { usePortfolio } from "@/store/portfolio";
 import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
 import { useWallet } from "@/store/wallet";
 import { TokenMark } from "./token-mark";
+import { useNow } from "./use-now";
 
 /**
  * Emergency stop: halts the bot AND the rebalancer immediately. Open
@@ -64,11 +64,8 @@ export function TerminalHeader({
   const setImportOpen = useWallet((s) => s.setImportOpen);
 
   const chgPos = chg != null && chg >= 0;
-  const [now, setNow] = useState<number | null>(null);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
+  // Shared ticking clock (useNow) — the same single timer as the status bar.
+  const now = useNow(1000);
   const freshnessWindowMs = (clampSyncSec(syncSec ?? DEFAULT_SYNC_SEC) + 15) * 1_000;
   const freshness = measureSnapshotFreshness(snap, freshnessWindowMs, now ?? Number.NaN);
   const ageSeconds = freshness.ageMs != null && freshness.ageMs >= 0

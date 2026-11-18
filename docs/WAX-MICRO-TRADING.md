@@ -4,7 +4,7 @@ LEEF Trader targets WAX/Antelope micro-liquidity books. The engine must support 
 
 ## Default WAX profile
 
-New WAX/LEEF bot sessions use the bounded WAX Micro Active profile:
+Untouched WAX/LEEF saves from bot-store v15 migrate to the bounded WAX Micro Active profile. Fresh installs retain the standard DEFAULT_RISK profile unless the user selects WAX Micro Active:
 
 - 10-second book polling and cooldown, with a 60 execution-attempts-per-hour cap.
 - 4% directional price-impact ceiling and 0.8% slippage tolerance.
@@ -13,7 +13,7 @@ New WAX/LEEF bot sessions use the bounded WAX Micro Active profile:
 - 7.5% maximum pool-share sizing.
 - 1.5% maximum loss per volume echo, with the existing $5 session echo budget and account-level drawdown/daily-loss breakers.
 
-A saved profile is migrated only when it exactly matches the untouched previous WAX defaults. Customized risk settings are preserved. Users can still select Conservative, Balanced, Standard, or WAX Micro Active.
+A saved profile is migrated only when it exactly matches the untouched previous WAX defaults. Customized risk settings are preserved. Fresh installs do not silently receive the higher-activity profile. Users can select Conservative, Balanced, Standard, or WAX Micro Active.
 
 ## Volume selection
 

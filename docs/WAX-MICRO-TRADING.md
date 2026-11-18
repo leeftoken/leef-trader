@@ -6,7 +6,7 @@ LEEF Trader targets WAX/Antelope micro-liquidity books. The engine must support 
 
 New WAX/LEEF bot sessions use the bounded WAX Micro Active profile:
 
-- 10-second cooldown and 60 execution attempts per hour.
+- 10-second book polling and cooldown, with a 60 execution-attempts-per-hour cap.
 - 4% directional price-impact ceiling and 0.8% slippage tolerance.
 - 55% engine confidence floor and 0.2% directional edge floor.
 - Up to 4 configured route hops (the Volume Maker path itself is capped at 3).

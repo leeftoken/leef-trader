@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { classifyTradeError, isEconomicFailureCode, isEconomicFailureReason, TradeError } from "./trade-error";
 import {
+  TRADE_CYCLE_STORAGE_KEY,
   beginSigning,
   liveCapitalBlocked,
   markBroadcast,
   markConfirmed,
   markUnknown,
+  restoreTradeCycleLock,
   unknownBlockReason,
 } from "./trade-cycle";
 
@@ -82,7 +84,8 @@ describe("economic failure classification (danger-score feed)", () => {
 
 describe("trade-cycle lock", () => {
   it("blocks every subsystem behind the same live-capital lock", () => {
-    markConfirmed();
+    if (typeof localStorage !== "undefined") localStorage.removeItem(TRADE_CYCLE_STORAGE_KEY);
+    restoreTradeCycleLock();
     expect(liveCapitalBlocked()).toBe(false);
     expect(beginSigning()).toBe(true);
     expect(liveCapitalBlocked()).toBe(true);
@@ -93,7 +96,7 @@ describe("trade-cycle lock", () => {
     expect(liveCapitalBlocked()).toBe(true);
     expect(unknownBlockReason()).toMatch(/UNKNOWN/);
     expect(beginSigning()).toBe(false);
-    markConfirmed();
+    markConfirmed("aa".repeat(32));
     expect(liveCapitalBlocked()).toBe(false);
   });
 });

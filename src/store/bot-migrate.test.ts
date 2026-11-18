@@ -12,7 +12,10 @@ type Migrated = {
 const migrate = (blob: unknown, version: number) =>
   useBot.persist.getOptions().migrate!(blob, version) as Migrated;
 
-describe("bot store v14 migration", () => {
+describe("bot store v16 migration", () => {
+  it("bumps the persisted schema so v15 users actually execute the WAX profile migration", () => {
+    expect(useBot.persist.getOptions().version).toBe(16);
+  });
   it("v12 blob with legacy defaults gets the safer defaults + a notice, other settings kept", () => {
     const out = migrate(
       {

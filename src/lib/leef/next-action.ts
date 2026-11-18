@@ -13,7 +13,6 @@
 import type { LeefSnapshot, SwapRoute } from "./types";
 import { usdPriceOf } from "./cost-model";
 import {
-  bestExecutionRouteOnGraph,
   buildRouteGraph,
   MAX_ROUTE_HOPS,
   rankExecutionRoutesOnGraph,

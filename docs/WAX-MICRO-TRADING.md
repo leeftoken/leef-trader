@@ -19,6 +19,7 @@ A saved profile is migrated only when it exactly matches the untouched previous 
 
 - Volume Maker evaluates a deterministic size ladder for each supported holding rather than sampling one pseudo-random size per token.
 - It ranks clips by expected net USD after route fees, impact and executable exit checks. Notional is only a tie-breaker.
+- Auto is an opportunity selector, not an implicit Grid strategy: it does not create an unanchored grid-seed buy. The explicit Grid strategy owns seed entries.
 - The Auto strategy first selects a positive expected-value candidate. If none exists, it may try a bounded atomic echo, then a bounded multi-pool LEEF tape clip. The tape is still subject to the session echo budget and exact on-chain min-out floor.
 - Multi-hop routes are never approved from oracle marks alone; the planner compares the executable reverse route to reject phantom mark-based gains.
 - The live executor re-quotes through Alcor and validates exact transfer settlement. A planner estimate is never treated as a fill.

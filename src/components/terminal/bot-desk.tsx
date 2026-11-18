@@ -61,7 +61,7 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
-import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
+import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradeAccount, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 import { assessUnknownExecution } from "@/lib/wallet/recovery";
 import { metaOf } from "@/lib/wallet/tokens";
@@ -114,6 +114,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const [confirmNoBroadcast, setConfirmNoBroadcast] = useState(false);
   const unresolvedTxid = pendingTxid();
   const unresolvedPhase = tradePhase();
+  const interruptedAccount = tradeAccount();
+  const recoveryAccount = interruptedAccount ?? account;
+  const recoveryAccountMatches = !interruptedAccount || interruptedAccount === account;
+  const canManuallyUnlockInterrupted =
+    recoveryAccountMatches && canConfirmInterruptedSigningNoBroadcast(recoveryAccount);
   const hasRecoveryLock = liveCapitalBlocked();
 
   async function inspectPendingSettlement() {
@@ -335,22 +340,22 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                   ? `Transaction ${unresolvedTxid.slice(0, 12)}… is ${unresolvedPhase}. Inspect chain settlement before resuming.`
                   : "A signing attempt was interrupted before a transaction ID was saved. Check wallet activity before trading again."}
               </p>
-              {!unresolvedTxid && canConfirmInterruptedSigningNoBroadcast() && (
+              {!unresolvedTxid && canManuallyUnlockInterrupted && (
                 <div className="mt-3 space-y-2 rounded-md border border-amber-500/30 bg-background/70 p-3">
                   <p className="text-xs font-medium">
                     Interrupted at {new Date(tradeStartedAt()).toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Open the account history and inspect activity from this time onward. Look for any outgoing token transfer to swap.alcor or any trade you did not expect. Also make sure no Anchor/Cloud Wallet signing prompt is still pending.
+                    Confirm this is the same account that was connected when signing was interrupted. Inspect its history from this time onward for any outgoing token transfer to swap.alcor or any trade you did not expect. Also make sure no Anchor/Cloud Wallet signing prompt is still pending.
                   </p>
-                  {account && (
+                  {recoveryAccount && (
                     <a
                       className="inline-flex text-xs font-medium underline underline-offset-4"
-                      href={`https://wax.bloks.io/account/${encodeURIComponent(account)}`}
+                      href={`https://wax.bloks.io/account/${encodeURIComponent(recoveryAccount)}`}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Open {account} on WAX explorer
+                      Open {recoveryAccount} on WAX explorer
                     </a>
                   )}
                   {!confirmNoBroadcast ? (
@@ -358,7 +363,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={!account}
+                      disabled={!account || !recoveryAccountMatches}
                       onClick={() => setConfirmNoBroadcast(true)}
                     >
                       I checked: no transaction was submitted
@@ -382,7 +387,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                           size="sm"
                           variant="destructive"
                           onClick={() => {
-                            const released = confirmInterruptedSigningNoBroadcast();
+                            const released = confirmInterruptedSigningNoBroadcast(recoveryAccount);
                             setConfirmNoBroadcast(false);
                             setRecoveryNotice(
                               released
@@ -398,9 +403,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                   )}
                 </div>
               )}
-              {!unresolvedTxid && !canConfirmInterruptedSigningNoBroadcast() && (
+              {!unresolvedTxid && !canManuallyUnlockInterrupted && (
                 <p className="mt-2 text-xs text-amber-600">
-                  This lock cannot be self-cleared because its saved state is invalid. Keep it locked and request a transaction-state review.
+                  {interruptedAccount && interruptedAccount !== account
+                    ? `This lock belongs to ${interruptedAccount}. Switch back to that account before checking history; the current account is not sufficient.`
+                    : "Connect the original wallet account and inspect its history before recovery. A malformed lock record cannot be self-cleared; request a transaction-state review."}
                 </p>
               )}
               {unresolvedTxid && (

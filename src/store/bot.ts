@@ -510,6 +510,7 @@ export const useBot = create<BotState>()(
             ...DEFAULT_RISK,
             ...(restRisk as Partial<BotRisk>),
             ...(safer?.risk ?? {}),
+            ...(waxMicroUpgrade ?? {}),
             minTradeUsd: usd.minTradeUsd,
             maxPositionUsd: usd.maxPositionUsd,
             operationalReserveUsd: usd.operationalReserveUsd,

@@ -27,8 +27,7 @@ import {
   type TransferActionData,
 } from "./antelope";
 import { BroadcastTimeoutError, fetchBalances, getChainInfo, pushSigned } from "./chain";
-import { reconcileTransfersLater } from "./reconcile";
-import { markBroadcast, markConfirmed, markFailed, markInterruptedSigning, markUnknown } from "./trade-cycle";
+import { markBroadcast, markInterruptedSigning, markUnknown } from "./trade-cycle";
 import {
   ALCOR_SWAP_CONTRACT,
   arbFloorViolation,
@@ -418,20 +417,14 @@ async function dispatchActions(opts: {
   } catch (err) {
     if (err instanceof BroadcastTimeoutError) {
       // The node never answered — the transaction may still land. Lock the
-      // capital as UNKNOWN with the known txid and let reconciliation decide.
+      // capital as UNKNOWN with the known txid, but do NOT release it here.
+      // Only the bot loop can reconcile chain evidence AND update its saved
+      // position + execution journal before releasing the capital lock.
       // NEVER re-sign, NEVER re-broadcast, NEVER duplicate-spend.
       markUnknown(txid);
-      // Start reconciliation here, at the boundary where the txid is known.
-      // The caller may classify/return the error, but this read-only poll keeps
-      // running and is the only path that can unlock UNKNOWN capital.
-      void reconcileTransfersLater(txid).then((rec) => {
-        if (rec.status === "confirmed") markConfirmed();
-        else if (rec.status === "failed") markFailed();
-        // still unknown → stay locked; never submit another transaction
-      });
       throw new TradeError(
         "TRANSACTION_UNKNOWN",
-        `Broadcast timed out — tracking tx ${txid.slice(0, 10)}… on-chain; not resubmitting`,
+        `Broadcast timed out — tracking tx ${txid} on-chain; not resubmitting`,
       );
     }
     throw err;

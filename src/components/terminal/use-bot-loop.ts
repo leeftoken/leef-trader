@@ -2303,6 +2303,13 @@ async function runBotOnceInner(
         priceUsd: snap.leefUsd,
         txid,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "BUY fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "buy", strategy: b.strategy, mode,
         tokenIn: quoteTok, tokenOut: baseTok,
@@ -2493,6 +2500,13 @@ async function runBotOnceInner(
         txid,
         pnlUsd,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "SELL fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "sell", strategy: position?.strategy ?? b.strategy, mode,
         tokenIn: b.base || "LEEF", tokenOut: b.quote || "WAX",
@@ -2681,6 +2695,13 @@ async function runBotOnceInner(
         txid,
         pnlUsd: tapePnl,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "SWAP fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "swap", strategy: b.strategy, mode,
         tokenIn: decision.tokenIn, tokenOut: decision.tokenOut,
@@ -2942,6 +2963,13 @@ async function runBotOnceInner(
         txid,
         pnlUsd,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "ARB fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "arb", strategy: b.strategy, mode,
         tokenIn: qSym, tokenOut: qSym,

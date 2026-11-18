@@ -61,7 +61,8 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
-import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradeAccount, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
+import { ensureUnknownExecutionJournal } from "@/lib/wallet/recovery-journal";
+import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradeAccount, tradeIntent as persistedTradeIntent, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 import { assessUnknownExecution } from "@/lib/wallet/recovery";
 import { metaOf } from "@/lib/wallet/tokens";
@@ -142,21 +143,40 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         return;
       }
 
+      const intent = persistedTradeIntent();
+      // The hot-path journal is buffered and can be lost if the tab reloads
+      // between broadcast confirmation and the next journal flush. Restore
+      // only from the persisted signing intent; duplicate rows still fail closed.
+      const journalReady = await ensureUnknownExecutionJournal(unresolvedTxid, intent, {
+        deferStateAppliedSettlement: true,
+      });
       const entries = await journalAll();
       const matching = entries.filter(
         (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === unresolvedTxid,
       );
-      if (matching.length !== 1) {
-        setRecoveryNotice(
-          "The transaction is confirmed, but there is no unique saved live-trade record to map it safely to a bot position. The lock remains in place; copy the transaction ID and contact support.",
-        );
+      if (!journalReady || matching.length !== 1) {
+        const reason = matching.length > 1
+          ? "Several live execution records match this transaction. Automatic recovery cannot choose between them; the lock remains in place for support review."
+          : !intent && matching.length === 0
+            ? "No saved live execution record or persisted trade intent is available for this transaction. The lock remains in place for support review."
+            : "The saved trade intent could not be restored into one unique live execution record. The lock remains in place for support review.";
+        setRecoveryNotice(reason);
         return;
       }
 
       const entry = matching[0]!;
       const botState = useBot.getState();
       let actualOut = 0;
-      if (botState.recoveredTxids.includes(unresolvedTxid)) {
+      if (intent?.stateApplied) {
+        // The original execution already persisted bot position/statistics.
+        // Read transfer output for the journal only; never apply the fill twice.
+        const outputMeta = entry.tokenOut ? metaOf(entry.tokenOut, snap) : null;
+        if (!outputMeta) {
+          setRecoveryNotice("The bot state was already applied, but the output-token contract is ambiguous. The lock remains in place for review.");
+          return;
+        }
+        actualOut = assetDelta(result.transfers, account, outputMeta.symbol, outputMeta.contract);
+      } else if (botState.recoveredTxids.includes(unresolvedTxid)) {
         // The position update may have completed just before a tab reload.
         // Re-derive the output amount from chain transfers, then finish the
         // audit-row update without applying the position change twice.
@@ -185,7 +205,10 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         botState.applyRecoveredExecution(unresolvedTxid, assessment.nextPosition);
       }
 
-      const journalSaved = await settleUnknownExecution(unresolvedTxid, actualOut);
+      const journalSaved =
+        intent?.stateApplied && entry.status === "confirmed"
+          ? true
+          : await settleUnknownExecution(unresolvedTxid, actualOut);
       if (!journalSaved) {
         setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
         return;

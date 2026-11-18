@@ -30,6 +30,7 @@ import {
   setJournalCycleId,
   type MarketFixture,
 } from "@/lib/leef/journal";
+import { ensureUnknownExecutionJournal } from "@/lib/wallet/recovery-journal";
 import {
   bootLearningFromJournal,
   evaluateDueCounterfactuals,
@@ -875,50 +876,6 @@ function retainUnknownBroadcast(input: UnknownBroadcastExecution): boolean {
 
 const unknownJournalRestoreInFlight = new Set<string>();
 
-/**
- * Restore a missing execution row from the exact non-secret candidate saved
- * in the live lock. journalAll flushes its write buffer before reading, so
- * successful return proves one unique row exists for pollUnknown/settlement.
- */
-async function ensureUnknownExecutionJournal(
-  txid: string,
-  intent: BotTradeIntent | undefined,
-): Promise<boolean> {
-  const desiredStatus = intent?.stateApplied ? "confirmed" : "unknown";
-  const matches = (await journalAll()).filter(
-    (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
-  );
-  if (matches.length === 1) return matches[0]?.status === desiredStatus;
-  if (matches.length !== 0 || !intent) return false;
-
-  journal({
-    kind: "execution",
-    action: intent.action,
-    strategy: intent.strategy,
-    mode: "live",
-    tokenIn: intent.tokenIn,
-    tokenOut: intent.tokenOut,
-    amountIn: intent.amountIn,
-    expectedOut: intent.expectedOut,
-    txid,
-    status: desiredStatus,
-    sizeUsd: intent.sizeUsd,
-    predEdgePct: intent.predEdgePct,
-    poolIds: intent.poolIds,
-    hops: intent.hops,
-    venues: intent.venues,
-    leefUsd: intent.leefUsd,
-    waxUsd: intent.waxUsd,
-    reason: intent.stateApplied
-      ? "Restored confirmed execution metadata; bot position/statistics were already persisted before reload"
-      : "Restored unresolved execution metadata from the persisted bot signing intent after reload",
-  });
-
-  const restored = (await journalAll()).filter(
-    (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
-  );
-  return restored.length === 1 && restored[0]?.status === desiredStatus;
-}
 
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {

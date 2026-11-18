@@ -247,6 +247,37 @@ describe("parseAiProposal", () => {
     }, swapContext)).toBeNull();
   });
 
+  it("normalizes harmless casing and whitespace in TypeSafe choice labels", () => {
+    const p = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "CHOICE", choice: " BUY ", confidence: 0.91 },
+      [AI_QID.sizeBucket]: { type: "choice", choice: " HALF ", confidence: 0.86 },
+      [AI_QID.riskStress]: { type: "NOUL", noul: 0.1 },
+      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
+    }, context);
+    expect(p?.action).toBe("buy");
+    expect(p?.params.sizePct).toBe("50");
+  });
+
+  it("derives missing choice confidence from the selected choice probability", () => {
+    const p = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: { type: "choice", choice: "buy", probabilities: { buy: 0.91, hold: 0.09 } },
+      [AI_QID.sizeBucket]: { type: "choice", choice: "half", probabilities: { half: 0.88, quarter: 0.12 } },
+    }, context);
+    expect(p?.action).toBe("buy");
+    expect(p?.confidence).toBeCloseTo(0.88);
+  });
+
+  it("reads Noul yes probability when the gateway returns the equivalent probability map", () => {
+    const p = parseAiProposal({
+      ...answers(),
+      [AI_QID.riskStress]: { type: "noul", probabilities: { true: 0.1, false: 0.9 } },
+      [AI_QID.riskExecute]: { type: "noul", probabilities: { true: 0.9, false: 0.1 } },
+    }, context);
+    expect(p?.action).toBe("buy");
+  });
+
   it("rejects out-of-range confidence and Noul values instead of clamping them", () => {
     expect(parseAiProposal({
       ...answers(),

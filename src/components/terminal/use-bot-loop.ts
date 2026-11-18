@@ -1927,7 +1927,7 @@ async function runBotOnceInner(
           b.setLastReason(reason);
           return { kind: "hold", reason };
         }
-        if (!beginSigning()) return decision;
+        if (!beginSigning(w.account)) return decision;
         const tSign = Date.now();
         try {
           const exec = await signAndPushSwap({
@@ -2107,7 +2107,7 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       const t0 = Date.now();
       if (live) {
-        if (!beginSigning()) return decision;
+        if (!beginSigning(w.account)) return decision;
         const tSign = Date.now();
         try {
           const exec = await signAndPushSwap({
@@ -2263,7 +2263,7 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       const tExec = Date.now();
       if (live) {
-        if (!beginSigning()) return decision;
+        if (!beginSigning(w.account)) return decision;
         try {
           const exec = await signAndPushSwap({
             account: w.account,
@@ -2468,7 +2468,7 @@ async function runBotOnceInner(
       let realizedQuote: number | null = null;
       const t0 = Date.now();
       if (live) {
-        if (!beginSigning()) return decision;
+        if (!beginSigning(w.account)) return decision;
         const tSign = Date.now();
         try {
           const res = await signAndPushArb({

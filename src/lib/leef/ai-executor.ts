@@ -448,9 +448,13 @@ export function parseAiProposal(
   // One candidate, one allowed action. Jev cannot select an action, size,
   // route or token pair; it only approves/rejects the deterministic candidate.
   const candidate = context.candidate;
-  const action: AiAction = context.candidateKind === "preview"
+  const action: AiAction = context.candidateKind === "preview" || context.candidateKind === "buy"
     ? "buy"
-    : context.candidateKind;
+    : context.candidateKind === "swap"
+      ? "swap"
+      : context.candidateKind === "arb"
+        ? "arb"
+        : "hold";
   const allowed = context.allowedActions.filter((item) => item !== "hold");
   if (
     (action !== "buy" && action !== "swap" && action !== "arb") ||

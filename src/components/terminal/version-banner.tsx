@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
  */
 
 const POLL_MS = 5 * 60_000;
-const VERSION_URL = "/version.json";
+const VERSION_URL = `${import.meta.env.BASE_URL}version.json`;
 
 async function fetchVersion(): Promise<string | null> {
   try {

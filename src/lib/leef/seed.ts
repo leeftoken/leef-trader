@@ -9,7 +9,7 @@ import type { LeefSnapshot } from "./types";
  */
 
 export const SEED_MAX_AGE_MS = 30 * 60_000;
-const SEED_URL = "/seed-snapshot.json";
+const SEED_URL = `${import.meta.env.BASE_URL}seed-snapshot.json`;
 
 type SeedFile = {
   v?: unknown;

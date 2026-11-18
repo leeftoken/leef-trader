@@ -175,6 +175,18 @@ describe("planLeefTape", () => {
       expect(clip.usdIn).toBeLessThanOrEqual(0.5 + 1e-6);
     }
   });
+  it("selects the same best clip regardless of seed after evaluating the full size ladder", () => {
+    const s = snap([mkPool(50_000, 500_000_000)]);
+    const first = planLeefTape(s, { WAX: 500 }, {
+      minUsd: 0.1, maxUsd: 2, maxLossPct: 50, seed: 1,
+    });
+    const second = planLeefTape(s, { WAX: 500 }, {
+      minUsd: 0.1, maxUsd: 2, maxLossPct: 50, seed: 987654,
+    });
+    expect(first?.amountIn).toBe(second?.amountIn);
+    expect(first?.netUsd).toBeCloseTo(second?.netUsd ?? 0, 10);
+  });
+
   it("enforces minUsd: a sub-min holding tapes nothing (never clamped up)", () => {
     const s = snap([mkPool(50_000, 500_000_000)]);
     // 1 WAX ≈ $0.02 < the $0.50 min — previously this traded BELOW the floor.

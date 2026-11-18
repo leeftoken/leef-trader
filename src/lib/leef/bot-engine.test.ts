@@ -64,9 +64,10 @@ function snapshot(): LeefSnapshot {
 
 describe("Auto strategy WAX micro fallback", () => {
   it("uses a bounded multi-pool tape clip after no profitable candidate or atomic echo exists", () => {
+    const snap = snapshot();
     const decision = evaluateBot({
       now: Date.now(),
-      snap: snapshot(),
+      snap,
       series: [],
       running: true,
       strategy: "auto",
@@ -83,7 +84,7 @@ describe("Auto strategy WAX micro fallback", () => {
       cooldownUntil: 0,
       tradesThisHour: 0,
       sessionRealizedUsd: 0,
-      sessionStartEquityUsd: 1_000,
+      sessionStartEquityUsd: 1,
       echoCostUsd: 0,
       flowStates: null,
     });

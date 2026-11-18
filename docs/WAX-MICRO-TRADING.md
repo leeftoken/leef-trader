@@ -45,3 +45,12 @@ Do not rotate the signer model based on subjective chat quality alone. Benchmark
 ## Validation
 
 Run the planner and risk-profile unit tests, full typecheck/lint/test/build suite, and paper-mode replay against recorded WAX market snapshots before enabling live sessions. Measure realized net P&L, actual fees, confirmed pool volume, rejection reasons and recovery incidents separately.
+
+
+## Persisted bot migration and live-lock recovery
+
+- Bot store schema v16 is the migration boundary for untouched v15 WAX/LEEF defaults. Without the version bump, Zustand does not invoke the migration for an existing v15 save.
+- The live capital lock records the originating account and start time for each bot signing attempt.
+- Anchor/Cloud Wallet performs signing and broadcast outside the app. A definitive user cancellation releases the in-flight signing lock; an ambiguous wallet error with no transaction ID remains blocked.
+- A txid-less interrupted lock can only be released through the Bot Desk's two-step operator acknowledgement after checking the **same WAX account's** activity from the recorded start time. A lock with a txid still requires transaction reconciliation; malformed lock storage is never self-clearable.
+- The recovery acknowledgement is an explicit user attestation, not an automated proof that no transaction landed. When history is incomplete or ambiguous, keep the lock and escalate for transaction-state review.

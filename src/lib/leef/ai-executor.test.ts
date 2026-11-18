@@ -297,8 +297,32 @@ describe("parseAiProposal", () => {
       [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
     }), context);
     expect(p).not.toBeNull();
-    expect(p!.confidence).toBeCloseTo(0.8, 10);
-    expect(p!.weakest).toBe(AI_QID.riskStress);
+    expect(p!.confidence).toBeCloseTo(0.98, 10);
+    expect(p!.weakest).toBe(AI_QID.action);
+  });
+
+  it("does not let an uncertain but bounded size preference veto an otherwise safe action", () => {
+    const p = parseAiProposal(answers({
+      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.91 },
+      [AI_QID.sizeBucket]: { type: "choice", choice: "quarter", confidence: 0.2 },
+      [AI_QID.riskStress]: { type: "noul", noul: 0.1 },
+      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
+    }), context);
+    expect(p?.action).toBe("buy");
+    expect(p?.params.sizePct).toBe("25");
+    expect(p?.confidence).toBe(0.91);
+  });
+
+  it("derives TypeSafe Choice confidence from a valid distribution, not the selected probability", () => {
+    const p = parseAiProposal({
+      ...answers(),
+      [AI_QID.action]: {
+        type: "choice",
+        choice: "buy",
+        probabilities: { hold: 0.1, buy: 0.9 },
+      },
+    }, context);
+    expect(p?.confidence).toBeCloseTo(0.8, 10);
   });
 
   it("rejects candidates under acute market stress or with unsafe data", () => {

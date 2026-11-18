@@ -61,7 +61,7 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
-import { liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { confirmNoBroadcastAfterReview, interruptedSigningSince, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 import { assessUnknownExecution } from "@/lib/wallet/recovery";
 import { metaOf } from "@/lib/wallet/tokens";
@@ -111,8 +111,10 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryResult, setRecoveryResult] = useState<ReconcileResult | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [confirmNoBroadcast, setConfirmNoBroadcast] = useState(false);
   const unresolvedTxid = pendingTxid();
   const unresolvedPhase = tradePhase();
+  const interruptedSince = interruptedSigningSince();
   const hasRecoveryLock = liveCapitalBlocked();
 
   async function inspectPendingSettlement() {
@@ -338,6 +340,51 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                 <p className="mt-2 break-all rounded border border-border/60 bg-background/70 p-2 font-mono text-[11px] text-muted-foreground select-all">
                   {unresolvedTxid}
                 </p>
+              )}
+              {!unresolvedTxid && unresolvedPhase === "blocked" && (
+                <div className="mt-3 rounded-md border border-amber-500/30 bg-background/70 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Interrupted signing time: {interruptedSince ? new Date(interruptedSince).toLocaleString() : "unknown"}.
+                    Check the wallet's outgoing transaction history around this time and verify that no swap was broadcast.
+                    If anything is pending or uncertain, do not release this lock.
+                  </p>
+                  {!confirmNoBroadcast ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-3"
+                      onClick={() => setConfirmNoBroadcast(true)}
+                    >
+                      I checked wallet history
+                    </Button>
+                  ) : (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <p className="w-full text-xs font-medium text-amber-600">
+                        Confirm only if wallet history shows no outgoing transaction from this interrupted attempt.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          const released = confirmNoBroadcastAfterReview();
+                          setConfirmNoBroadcast(false);
+                          setRecoveryNotice(
+                            released
+                              ? "The interrupted signing lock was released after your wallet-history confirmation. Live trading may resume."
+                              : "The lock changed or is no longer eligible for this recovery. No lock was released.",
+                          );
+                        }}
+                      >
+                        Confirm no transaction was broadcast
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmNoBroadcast(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {mode === "live" ? (

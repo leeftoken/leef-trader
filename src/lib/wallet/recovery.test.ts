@@ -162,7 +162,8 @@ describe("assessUnknownExecution", () => {
     if (!result.ok) return;
     expect(result.nextPosition?.amountLeef).toBeCloseTo(26487.0749, 4);
     expect(result.nextPosition?.mode).toBe("live");
-    expect(result.recoveredPnlUsd).toBeDefined();
+    expect(result.nextPosition?.entryCostUsd).toBeCloseTo(0.1250444321, 8);
+    expect(result.recoveredPnlUsd).toBeCloseTo(-0.0113488069, 8);
     expect(result.actualOut).toBeCloseTo(-1.36393239, 8);
   });
 

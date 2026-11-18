@@ -550,7 +550,7 @@ export const useBot = create<BotState>()(
             usd.notice,
             safer?.notice,
             waxMicroUpgrade
-              ? "WAX Micro Active profile applied to untouched defaults: 10s cooldown, 60 trades/hour, and a 1.5% per-echo loss ceiling with the existing $5 session budget."
+              ? "WAX Micro Active profile applied to untouched defaults: 10s book polling/cooldown, 60 trades/hour, and a 1.5% per-echo loss ceiling with the existing $5 session budget."
               : null,
           ].filter(Boolean).join(" ") || null,
           // Forward-safe: future version bumps must not silently re-enable the

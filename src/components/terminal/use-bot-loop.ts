@@ -738,6 +738,94 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
   })();
 }
 
+type UnknownBroadcastExecution = {
+  action: "buy" | "sell" | "swap" | "arb";
+  account: string;
+  base: string;
+  quote: string;
+  strategy: ReturnType<typeof useBot.getState>["strategy"];
+  snapshot: LeefSnapshot;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: number;
+  expectedOut: number;
+  sizeUsd: number;
+  latencyMs: number;
+  route?: SwapRoute;
+  predEdgePct?: number;
+  poolIds?: number[];
+  hops?: number;
+  venues?: string[];
+  context?: { regime: string; volPct: number; dangerScore: number };
+};
+
+/**
+ * A signer timeout throws before the ordinary execution branch can append its
+ * journal row. Capture the exact code-generated candidate here so the normal
+ * read-only recovery can reconcile transfers, position state and the journal.
+ * The capital lock is never released from the signer layer.
+ */
+function retainUnknownBroadcast(input: UnknownBroadcastExecution): boolean {
+  const txid = pendingTxid();
+  if (!txid) return false;
+
+  // The signer may already have marked this tx UNKNOWN, or the wallet may have
+  // returned a txid and a later confirmation read failed. Normalize both cases.
+  markUnknown(txid);
+  if (pendingTxid() !== txid) return false;
+
+  const bot = useBot.getState();
+  const reason =
+    `${input.action.toUpperCase()} broadcast ${txid.slice(0, 10)}… is unresolved — ` +
+    "waiting for verified on-chain transfer settlement; capital remains locked";
+  journal({
+    kind: "execution",
+    action: input.action,
+    strategy: input.strategy,
+    mode: "live",
+    tokenIn: input.tokenIn,
+    tokenOut: input.tokenOut,
+    amountIn: input.amountIn,
+    expectedOut: input.expectedOut,
+    txid,
+    status: "unknown",
+    sizeUsd: input.sizeUsd,
+    predEdgePct: input.predEdgePct,
+    latencyMs: input.latencyMs,
+    ...(input.route
+      ? routeJournalMeta(
+          input.route,
+          input.amountIn,
+          input.amountIn > 0 ? input.sizeUsd / input.amountIn : 0,
+        )
+      : {}),
+    ...(input.poolIds ? { poolIds: input.poolIds } : {}),
+    ...(input.hops != null ? { hops: input.hops } : {}),
+    ...(input.venues ? { venues: input.venues } : {}),
+    ...(input.context ?? {}),
+    leefUsd: input.snapshot.leefUsd,
+    waxUsd: input.snapshot.waxUsd,
+  });
+  bot.markTrade(adaptiveCooldownSec(bot.risk.cooldownSec, bot.strategy, bot.stats.lastPnlUsd));
+  bot.clearRejectionStreak();
+  bot.setLastReason(reason);
+  bot.pushDecision({
+    kind: "hold",
+    mode: "live",
+    reason,
+    priceUsd: input.snapshot.leefUsd,
+    txid,
+  });
+  void pollUnknown(txid, {
+    snapshot: input.snapshot,
+    account: input.account,
+    base: input.base,
+    quote: input.quote,
+    strategy: input.strategy,
+  });
+  return true;
+}
+
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
   const txid = pendingTxid();
@@ -1983,6 +2071,23 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "buy",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: quoteTok,
+            tokenOut: baseTok,
+            amountIn: decision.amountIn,
+            expectedOut: decision.route.amountOut,
+            sizeUsd: decision.amountIn * bounds.quoteUsd,
+            latencyMs: Date.now() - cycleT0,
+            route: decision.route,
+            predEdgePct: decision.edge?.netEdgePct,
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2160,6 +2265,23 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "sell",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: baseTok,
+            tokenOut: quoteTok,
+            amountIn: decision.amountLeef,
+            expectedOut: decision.route.amountOut,
+            sizeUsd: decision.amountLeef * (usdPriceOf(baseTok, book) || book.leefUsd),
+            latencyMs: Date.now() - t0,
+            route: decision.route,
+            predEdgePct: position?.predEdgePct,
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2312,6 +2434,23 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "swap",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: decision.tokenIn,
+            tokenOut: decision.tokenOut,
+            amountIn: decision.amountIn,
+            expectedOut: decision.route.amountOut,
+            sizeUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, book) || 0),
+            latencyMs: Date.now() - tExec,
+            route: decision.route,
+            predEdgePct: decision.opportunity?.expectedNetEdgePct,
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2517,6 +2656,25 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "arb",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: qSym,
+            tokenOut: qSym,
+            amountIn: plan.quoteIn,
+            expectedOut: plan.quoteOut,
+            sizeUsd: plan.quoteIn * quoteMarkUsd,
+            latencyMs: Date.now() - t0,
+            predEdgePct: plan.profitPct * 100,
+            poolIds: [plan.buyPool.id, plan.sellPool.id],
+            hops: 2,
+            venues: ["alcor"],
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }

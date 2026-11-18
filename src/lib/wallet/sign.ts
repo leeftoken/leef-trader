@@ -738,15 +738,15 @@ export async function signAndPushArb(opts: {
   // floor, or nothing is signed. Fee and floor are denominated in the plan's
   // quote token (ANY configured quote, not just WAX).
   const quoteTok = plan.quoteToken;
+  // Arb plans may carry stale or venue-derived precision. Resolve the token
+  // identity against the authoritative snapshot/catalog before formatting a
+  // fee asset; WAX must always be 8dp, regardless of planner metadata.
+  const feeToken = metaOf(`${quoteTok.symbol}@${quoteTok.contract}`, opts.snap);
   const guaranteedQuote = memoMinOutSum(
     plan.sellLegs.map((l) => ({ input: l.input, memo: l.memo })),
     opts.account,
   );
-  const fee = platformFeeOn(guaranteedQuote, {
-    symbol: quoteTok.symbol,
-    contract: quoteTok.contract,
-    decimals: quoteTok.decimals,
-  });
+  const fee = platformFeeOn(guaranteedQuote, feeToken);
 
   const violation = arbFloorViolation({
     quoteIn: plan.quoteIn + (fee?.amount ?? 0),

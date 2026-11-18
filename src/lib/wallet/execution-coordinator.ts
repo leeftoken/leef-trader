@@ -45,11 +45,13 @@ export function capitalAvailable(): boolean {
  */
 export async function coordinateCapitalMovement<T extends { txid: string }>(opts: {
   owner: CapitalOwner;
+  account?: string;
   submit: () => Promise<T>;
   confirmation?: { budgetMs?: number; attempts?: number; delayMs?: number };
-  onSettled?: (result: ReconcileResult) => void | Promise<void>;
+  /** Return false to veto a successful transfer settlement (e.g. exact deltas mismatch). */
+  onSettled?: (result: ReconcileResult) => boolean | void | Promise<boolean | void>;
 }): Promise<CoordinatedResult<T>> {
-  if (!beginSigning()) {
+  if (!beginSigning(opts.account)) {
     throw new CapitalBusyError(
       opts.owner,
       unknownBlockReason() ?? "Another trade is signing, broadcasting, or reconciling",
@@ -68,8 +70,9 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
       delayMs: opts.confirmation?.delayMs ?? 300,
     });
     if (reconciliation.status === "confirmed") {
-      await opts.onSettled?.(reconciliation);
-      markConfirmed(txid);
+      const accepted = await opts.onSettled?.(reconciliation);
+      if (accepted === false) markUnknown(txid);
+      else markConfirmed(txid);
     } else if (reconciliation.status === "failed") {
       await opts.onSettled?.(reconciliation);
       markFailed(txid);
@@ -89,8 +92,9 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
             return;
           }
           if (later.status === "confirmed" && later.transfers.length > 0) {
-            await opts.onSettled?.(later);
-            markConfirmed(txid);
+            const accepted = await opts.onSettled?.(later);
+            if (accepted === false) markUnknown(txid);
+            else markConfirmed(txid);
             return;
           }
           markUnknown(txid);

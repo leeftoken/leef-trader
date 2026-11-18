@@ -688,7 +688,7 @@ export function executionForRecovery(entries: JournalEntry[]): JournalEntry | nu
   }
   if (!areEquivalentLiveExecutionRows(entries)) return null;
   return entries.find((entry) => entry.status === "unknown") ??
-    entries.find((entry) => entry.status === "confirmed" && entry.reconciledAt != null) ??
+    entries.find((entry) => entry.status === "confirmed") ??
     null;
 }
 
@@ -752,11 +752,21 @@ export async function settleUnknownExecution(
           }
 
           const canonicalRow = rows.find((row) => row.entry === canonical) ?? rows[0]!;
+          const mergedOutcome = Object.fromEntries(
+            EXECUTION_OUTCOME_FIELDS
+              .filter((field) => field !== "actualOut")
+              .flatMap((field) => {
+                const value = current.find((entry) => entry[field] != null)?.[field];
+                return value == null ? [] : [[field, value]];
+              }),
+          );
+          const existingReconciledAt = current.find((entry) => entry.reconciledAt != null)?.reconciledAt;
           const settled: JournalEntry = {
             ...canonicalRow.entry,
+            ...mergedOutcome,
             status: "confirmed",
             actualOut,
-            reconciledAt: canonicalRow.entry.reconciledAt ?? Date.now(),
+            reconciledAt: existingReconciledAt ?? Date.now(),
             reason: canonicalRow.entry.reason
               ? `${canonicalRow.entry.reason} · reconciled from confirmed on-chain transfer evidence`
               : "Reconciled from confirmed on-chain transfer evidence",

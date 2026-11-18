@@ -34,6 +34,17 @@ default. Nothing secret is ever stored.
 | `minNetEdgePct` | 0.1 | Minimum net edge after ALL modeled costs for any entry. |
 | `maxQuoteAgeSec` | 45 | Max book age a decision may act on. Runtime uses `max(this, syncSec + 15)`. |
 
+## WAX risk profiles
+
+The Bot desk offers **Conservative**, **Balanced**, **Standard**, **WAX Micro Active**, and **WAX High Activity** presets. Presets change the persisted risk values; they do not bypass the execution policy or exact router quote.
+
+| Profile | Cooldown | Trades/hour | Max impact | Slippage guard | Max echo loss | Session echo budget |
+|---|---:|---:|---:|---:|---:|---:|
+| WAX Micro Active | 10s | 60 | 4% | 0.8% | 1.5% | $5 |
+| WAX High Activity | 10s | 120 | 5% | 1.0% | 1.75% | $10 |
+
+WAX High Activity is an opt-in higher-risk profile. The per-echo and session echo limits remain finite, while the default 10% session drawdown and 3% session loss breakers stay enabled. It is not a guarantee that a trade will be available: the exact Alcor quote, on-chain min-out, spendable wallet balance, resource checks and transaction policy still decide whether a candidate may execute.
+
 ## Terminal sync (`store/terminal.ts` → `syncSec`)
 
 | Key | Default | Meaning |

@@ -14,6 +14,7 @@ import {
   pendingTxid,
   restoreTradeCycleLock,
   tradeAccount,
+  tradeIntent,
   tradePhase,
   tradeStartedAt,
   unknownBlockReason,
@@ -111,6 +112,33 @@ describe("live capital lock", () => {
     expect(tradePhase()).toBe("idle");
     expect(pendingTxid()).toBeUndefined();
     expect(liveCapitalBlocked()).toBe(false);
+  });
+
+
+  it("persists the original trade intent with a broadcast transaction for reload recovery", () => {
+    const intent = {
+      action: "buy" as const,
+      tokenIn: "WAX",
+      tokenOut: "LEEF",
+      amountIn: 2,
+      expectedOut: 1200,
+      sizeUsd: 0.04,
+      strategy: "auto",
+      base: "LEEF",
+      quote: "WAX",
+      predEdgePct: 0.8,
+      leefUsd: 0.000033,
+      waxUsd: 0.02,
+      poolIds: [1159],
+      hops: 1,
+      venues: ["alcor"],
+    };
+    expect(beginSigning("leefuser", intent)).toBe(true);
+    markBroadcast("7".repeat(64));
+
+    expect(restoreTradeCycleLock()).toBe("unknown");
+    expect(tradeAccount()).toBe("leefuser");
+    expect(tradeIntent()).toEqual(intent);
   });
 
   it("keeps a bot-owned broadcast timeout locked with its original account", () => {

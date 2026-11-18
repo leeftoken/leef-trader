@@ -82,6 +82,7 @@ import {
   markTradeStateApplied,
   pendingTxid,
   tradeAccount,
+  tradePhase,
   tradeIntent as persistedTradeIntent,
   type BotTradeIntent,
   recordCycleTimings,
@@ -880,7 +881,18 @@ const unknownJournalRestoreInFlight = new Set<string>();
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
   const txid = pendingTxid();
-  if (!txid || !account || !useWallet.getState().canSign() || unknownJournalRestoreInFlight.has(txid)) return;
+  // A pending txid also exists during the normal live signing/broadcast path.
+  // Restoring an UNKNOWN journal row before that path writes its confirmed
+  // execution creates a duplicate txid record and permanently trips the
+  // uniqueness guard. Reloaded locks are normalized to "unknown", so only
+  // that phase is eligible for automatic recovery.
+  if (
+    !txid ||
+    tradePhase() !== "unknown" ||
+    !account ||
+    !useWallet.getState().canSign() ||
+    unknownJournalRestoreInFlight.has(txid)
+  ) return;
   const lockedAccount = tradeAccount();
   if (lockedAccount && lockedAccount !== account) {
     useBot.getState().setLastReason(

@@ -229,3 +229,46 @@ describe("evaluateBot with quote=USDT (end-to-end sizing)", () => {
     expect(d.opportunity?.notionalUsd).toBeCloseTo(d.plan.quoteIn * WAX_USD, 6);
   });
 });
+
+describe("findBestArb size-ladder refinement", () => {
+  // Two WAX/LEEF books with reserves tuned so the net-quote-profit curve
+  // peaks at ~47% of the [0, 100] size span — between the coarse ladder
+  // fractions (0.35 and 0.6) the old scan would land on.
+  const peaked = mkSnap([
+    mkPool(1001, 2800.3, 21_653_502.3),
+    mkPool(1002, 3037.7, 21_856_112.3),
+  ]);
+
+  const coarseProfit = (snap: LeefSnapshot, maxIn: number): number => {
+    let best = -Infinity;
+    for (const f of [0, 0.2, 0.35, 0.6, 1]) {
+      const plan = findArb(snap, maxIn * f, -100, false, undefined, "WAX", "LEEF");
+      if (plan) best = Math.max(best, plan.quoteOut - plan.quoteIn);
+    }
+    return best;
+  };
+
+  it("finds a strictly better clip when the profit peak sits between ladder points", () => {
+    const plan = findBestArb(peaked, 100, -100, false, 0, undefined, "WAX", "LEEF")!;
+    expect(plan).not.toBeNull();
+    const refined = plan.quoteOut - plan.quoteIn;
+    const coarse = coarseProfit(peaked, 100);
+    expect(refined).toBeGreaterThan(coarse + 0.05);
+    // And it lands near the true peak (~47% of the span).
+    expect(plan.quoteIn / 100).toBeGreaterThan(0.4);
+    expect(plan.quoteIn / 100).toBeLessThan(0.6);
+  });
+
+  it("is never worse than the old coarse ladder on an arbitrary book", () => {
+    const books = [
+      mkSnap([mkPool(1, 10_000, 500_000_000), mkPool(2, 10_300, 500_000_000)]),
+      mkSnap([mkPool(3, 50_000, 500_000_000)]), // single pool: no arb
+      peaked,
+    ];
+    for (const book of books) {
+      const plan = findBestArb(book, 100, -100, false, 0, undefined, "WAX", "LEEF");
+      const refined = plan ? plan.quoteOut - plan.quoteIn : -Infinity;
+      expect(refined).toBeGreaterThanOrEqual(coarseProfit(book, 100) - 1e-9);
+    }
+  });
+});

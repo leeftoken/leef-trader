@@ -624,6 +624,75 @@ export async function journalAll(): Promise<JournalEntry[]> {
 }
 
 /**
+ * Immutable identity fields that must agree before duplicate rows can be
+ * treated as one execution. Timestamps/reasons/status are intentionally
+ * excluded because the race produced separate UNKNOWN and CONFIRMED writes.
+ */
+const EXECUTION_IDENTITY_FIELDS = [
+  "txid", "mode", "action", "strategy", "tokenIn", "tokenOut", "amountIn",
+  "expectedOut", "sizeUsd", "predEdgePct", "poolIds", "hops", "venues",
+  "routeSig", "leefUsd", "waxUsd",
+] as const;
+
+const EXECUTION_OUTCOME_FIELDS = [
+  "actualOut", "pnlUsd", "realizedSlipPct", "platformFeeAmount",
+  "platformFeeToken", "platformFeeCollected",
+] as const;
+
+/** True only when records describe the same live execution and don't conflict on settled outcome data. */
+export function areEquivalentLiveExecutionRows(entries: JournalEntry[]): boolean {
+  if (entries.length === 0) return false;
+  const first = entries[0]!;
+  if (
+    first.kind !== "execution" ||
+    first.mode !== "live" ||
+    !first.txid ||
+    !/^[a-f0-9]{64}$/i.test(first.txid) ||
+    entries.some((entry) =>
+      entry.kind !== "execution" ||
+      entry.mode !== "live" ||
+      entry.txid !== first.txid ||
+      (entry.status !== "unknown" && entry.status !== "confirmed")
+    )
+  ) return false;
+
+  const sameIdentity = entries.every((entry) =>
+    EXECUTION_IDENTITY_FIELDS.every((field) =>
+      JSON.stringify(entry[field]) === JSON.stringify(first[field])
+    )
+  );
+  if (!sameIdentity) return false;
+
+  return EXECUTION_OUTCOME_FIELDS.every((field) => {
+    const values = entries
+      .map((entry) => entry[field])
+      .filter((value) => value !== undefined && value !== null);
+    return values.every((value) => Object.is(value, values[0]));
+  });
+}
+
+/**
+ * Select one logical execution for recovery. Prefer UNKNOWN because position
+ * reconstruction requires it; otherwise a CONFIRMED row is usable only when
+ * its transfer settlement was already recorded.
+ */
+export function executionForRecovery(entries: JournalEntry[]): JournalEntry | null {
+  if (entries.length === 0) return null;
+  if (entries.length === 1) {
+    const entry = entries[0]!;
+    return entry.kind === "execution" &&
+      entry.mode === "live" &&
+      (entry.status === "unknown" || entry.status === "confirmed")
+      ? entry
+      : null;
+  }
+  if (!areEquivalentLiveExecutionRows(entries)) return null;
+  return entries.find((entry) => entry.status === "unknown") ??
+    entries.find((entry) => entry.status === "confirmed") ??
+    null;
+}
+
+/**
  * Resolve exactly one previously-unknown execution row after its chain
  * transfers have been checked and the corresponding bot state was persisted.
  * Idempotent when the same row was already settled. Ambiguous/missing rows
@@ -635,53 +704,83 @@ export async function settleUnknownExecution(
 ): Promise<boolean> {
   if (!/^[a-f0-9]{64}$/i.test(txid) || !Number.isFinite(actualOut)) return false;
   try {
-    const entries = await allEntries();
-    const matching = entries.filter((e) => e.kind === "execution" && e.txid === txid);
-    const settled = matching.filter((e) => e.status === "confirmed" && e.reconciledAt != null);
-    if (settled.length === 1 && matching.length === 1) return true;
-    const pending = matching.filter((e) => e.status === "unknown");
-    if (pending.length !== 1 || matching.length !== 1) return false;
-    const targetTs = pending[0]!.ts;
+    const entries = (await allEntries()).filter(
+      (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+    );
+    const selected = executionForRecovery(entries);
+    if (!selected) return false;
+    if (
+      entries.length === 1 &&
+      selected.status === "confirmed" &&
+      selected.reconciledAt != null
+    ) {
+      return selected.actualOut == null || Object.is(selected.actualOut, actualOut);
+    }
+
     const db = await openDb();
     if (!db) return false;
     return await new Promise<boolean>((resolve) => {
-      let matches = 0;
       let updated = false;
       try {
         const tx = db.transaction(STORE, "readwrite");
-        const req = tx.objectStore(STORE).openCursor();
+        const store = tx.objectStore(STORE);
+        const rows: { key: IDBValidKey; entry: JournalEntry }[] = [];
+        const req = store.openCursor();
         req.onsuccess = () => {
           const cursor = req.result;
-          if (!cursor) return;
-          const row = cursor.value as JournalEntry;
-          if (
-            row.kind === "execution" &&
-            row.txid === txid &&
-            row.ts === targetTs &&
-            row.status === "unknown"
-          ) {
-            matches += 1;
-            if (matches > 1) {
-              tx.abort();
-              return;
+          if (cursor) {
+            const row = cursor.value as JournalEntry;
+            if (row.kind === "execution" && row.mode === "live" && row.txid === txid) {
+              rows.push({ key: cursor.primaryKey, entry: row });
             }
-            cursor.update({
-              ...row,
-              status: "confirmed",
-              actualOut,
-              reconciledAt: Date.now(),
-              reason: row.reason
-                ? `${row.reason} · reconciled from confirmed on-chain transfer evidence`
-                : "Reconciled from confirmed on-chain transfer evidence",
-            } satisfies JournalEntry);
-            updated = true;
+            cursor.continue();
+            return;
           }
-          cursor.continue();
+
+          const current = rows.map((row) => row.entry);
+          const canonical = executionForRecovery(current);
+          if (!canonical) {
+            tx.abort();
+            return;
+          }
+          const knownOutputs = current
+            .map((entry) => entry.actualOut)
+            .filter((value): value is number => value != null);
+          if (knownOutputs.some((value) => !Object.is(value, actualOut))) {
+            tx.abort();
+            return;
+          }
+
+          const canonicalRow = rows.find((row) => row.entry === canonical) ?? rows[0]!;
+          const mergedOutcome = Object.fromEntries(
+            EXECUTION_OUTCOME_FIELDS
+              .filter((field) => field !== "actualOut")
+              .flatMap((field) => {
+                const value = current.find((entry) => entry[field] != null)?.[field];
+                return value == null ? [] : [[field, value]];
+              }),
+          );
+          const existingReconciledAt = current.find((entry) => entry.reconciledAt != null)?.reconciledAt;
+          const settled: JournalEntry = {
+            ...canonicalRow.entry,
+            ...mergedOutcome,
+            status: "confirmed",
+            actualOut,
+            reconciledAt: existingReconciledAt ?? Date.now(),
+            reason: canonicalRow.entry.reason
+              ? `${canonicalRow.entry.reason} · reconciled from confirmed on-chain transfer evidence`
+              : "Reconciled from confirmed on-chain transfer evidence",
+          };
+          store.put(settled, canonicalRow.key);
+          for (const row of rows) {
+            if (row.key !== canonicalRow.key) store.delete(row.key);
+          }
+          updated = true;
         };
         req.onerror = () => {
           try { tx.abort(); } catch { resolve(false); }
         };
-        tx.oncomplete = () => resolve(matches === 1 && updated);
+        tx.oncomplete = () => resolve(updated);
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
       } catch {

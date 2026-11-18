@@ -227,7 +227,10 @@ export function planLeefTape(
     .slice(0, 8);
 
   const clips: TapeClip[] = [];
-  let i = 0;
+  // Evaluate a deterministic size ladder for every holding. The old planner
+  // sampled one pseudo-random size per token, which could repeatedly miss a
+  // profitable micro-clip or choose a needlessly large loss-making clip.
+  const sizeFractions = [0, 0.05, 0.12, 0.28, 0.5, 0.75, 1];
   for (const { token, amount, usd } of entries) {
     const px = usdPriceOf(token.symbol, snap);
     if (!(px > 0)) continue;
@@ -236,15 +239,12 @@ export function planLeefTape(
     if (capUsd + 1e-12 < minUsd) continue;
     const loUsd = minUsd;
     const hiUsd = capUsd;
-    const r = ((seed + i * 97_331) >>> 0) / 4_294_967_296;
-    const ladder = [0, 0.05, 0.12, 0.28, 0.5, 0.75, 1];
-    const f = ladder[Math.floor(r * ladder.length) % ladder.length]!;
-    const spendUsd = loUsd + (hiUsd - loUsd) * f;
-    const spend = Math.min(amount, spendUsd / px);
-    if (!(spend > 0)) continue;
-    i += 1;
+    const testedAmounts = new Set<number>();
 
     const tryPair = (from: string, to: string, amt: number) => {
+      const amountKey = Math.round(amt * 1e8);
+      if (!(amt > 0) || testedAmounts.has(amountKey)) return;
+      testedAmounts.add(amountKey);
       const route = bestRouteWithinHops(graph, amt, from, to, maxHops);
       if (!route) return;
       const pxOut = usdPriceOf(to, snap);
@@ -278,11 +278,16 @@ export function planLeefTape(
       });
     };
 
-    if (token.symbol.toUpperCase() !== base) tryPair(token.symbol, base, spend);
-    if (token.symbol.toUpperCase() === base) {
-      for (const q of [...new Set([quote, "WAX", "WAXUSDC", "USDT", "USDC", "PARAUSD"])]) {
-        if (q === base) continue;
-        tryPair(base, q, spend);
+    for (const fraction of sizeFractions) {
+      const spendUsd = loUsd + (hiUsd - loUsd) * fraction;
+      const spend = Math.min(amount, spendUsd / px);
+      if (!(spend > 0)) continue;
+      if (token.symbol.toUpperCase() !== base) {
+        tryPair(token.symbol, base, spend);
+      } else {
+        for (const q of [...new Set([quote, "WAX", "WAXUSDC", "USDT", "USDC", "PARAUSD"])]) {
+          if (q !== base) tryPair(base, q, spend);
+        }
       }
     }
   }

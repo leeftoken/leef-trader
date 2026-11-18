@@ -210,7 +210,7 @@ describe("parseAiProposal", () => {
     expect(p).not.toBeNull();
     expect(p!.action).toBe("buy");
     expect(p!.params.sizePct).toBe("50");
-    expect(p!.confidence).toBeLessThanOrEqual(0.8);
+    expect(p!.confidence).toBeCloseTo(0.9, 10);
     expect(p!.confidence).toBeGreaterThanOrEqual(AI_EXEC_CONFIDENCE_MIN - 0.2);
     expect(p!.rationale).toContain("action=buy");
     expect(p!.snapshotFetchedAt).toBe(context.snapshotFetchedAt);
@@ -259,14 +259,14 @@ describe("parseAiProposal", () => {
     expect(p?.params.sizePct).toBe("50");
   });
 
-  it("derives missing choice confidence from the selected choice probability", () => {
+  it("derives missing Choice confidence from the full TypeSafe probability distribution", () => {
     const p = parseAiProposal({
       ...answers(),
       [AI_QID.action]: { type: "choice", choice: "buy", probabilities: { buy: 0.91, hold: 0.09 } },
       [AI_QID.sizeBucket]: { type: "choice", choice: "half", probabilities: { half: 0.88, quarter: 0.12 } },
     }, context);
     expect(p?.action).toBe("buy");
-    expect(p?.confidence).toBeCloseTo(0.88);
+    expect(p?.confidence).toBeCloseTo(0.82, 10);
   });
 
   it("reads Noul yes probability when the gateway returns the equivalent probability map", () => {

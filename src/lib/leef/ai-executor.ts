@@ -466,34 +466,34 @@ export function parseAiProposal(
 
   const finitePositive = (value: unknown): value is number =>
     typeof value === "number" && Number.isFinite(value) && value > 0;
-  const validIdentity =
-    typeof candidate.tokenIn === "string" && candidate.tokenIn.length > 0 &&
-    typeof candidate.tokenInContract === "string" && candidate.tokenInContract.length > 0 &&
-    typeof candidate.tokenOut === "string" && candidate.tokenOut.length > 0 &&
-    typeof candidate.tokenOutContract === "string" && candidate.tokenOutContract.length > 0;
-  const validRouteEvidence =
-    Array.isArray(candidate.poolIds) &&
-    candidate.poolIds.length > 0 &&
-    candidate.poolIds.every((id) => Number.isInteger(id) && id >= 0) &&
-    typeof candidate.hops === "number" &&
-    Number.isInteger(candidate.hops) &&
-    candidate.hops > 0;
-  if (!validIdentity || !validRouteEvidence ||
-      !finitePositive(candidate.amountIn) || !finitePositive(candidate.expectedOut)) {
-    return null;
-  }
+  const tokenIn = candidate.tokenIn;
+  const tokenInContract = candidate.tokenInContract;
+  const tokenOut = candidate.tokenOut;
+  const tokenOutContract = candidate.tokenOutContract;
+  const poolIds = candidate.poolIds;
+  const hops = candidate.hops;
+  if (
+    typeof tokenIn !== "string" || !tokenIn.trim() ||
+    typeof tokenInContract !== "string" || !tokenInContract.trim() ||
+    typeof tokenOut !== "string" || !tokenOut.trim() ||
+    typeof tokenOutContract !== "string" || !tokenOutContract.trim() ||
+    !Array.isArray(poolIds) || poolIds.length === 0 ||
+    !poolIds.every((id) => Number.isInteger(id) && id >= 0) ||
+    typeof hops !== "number" || !Number.isInteger(hops) || hops <= 0 ||
+    !finitePositive(candidate.amountIn) || !finitePositive(candidate.expectedOut)
+  ) return null;
 
   if (action === "arb") {
     if (
       (candidate.arbKind !== "volume" && candidate.arbKind !== "spread") ||
-      candidate.tokenIn.toUpperCase() !== candidate.tokenOut.toUpperCase() ||
-      candidate.tokenInContract.toLowerCase() !== candidate.tokenOutContract.toLowerCase() ||
-      candidate.poolIds.length < 2 ||
-      candidate.hops < 2
+      tokenIn.toUpperCase() !== tokenOut.toUpperCase() ||
+      tokenInContract.toLowerCase() !== tokenOutContract.toLowerCase() ||
+      poolIds.length < 2 ||
+      hops < 2
     ) return null;
   } else if (
-    candidate.tokenIn.toUpperCase() === candidate.tokenOut.toUpperCase() ||
-    candidate.tokenInContract.toLowerCase() === candidate.tokenOutContract.toLowerCase()
+    tokenIn.toUpperCase() === tokenOut.toUpperCase() ||
+    tokenInContract.toLowerCase() === tokenOutContract.toLowerCase()
   ) {
     return null;
   }
@@ -502,15 +502,15 @@ export function parseAiProposal(
   const selectedAction: AiAction = approved ? action : "hold";
   const rationale = [
     `trade=${approved ? "yes" : "no"} p=${probabilityYes.toFixed(2)}`,
-    `${action} ${candidate.tokenIn}@${candidate.tokenInContract}→${candidate.tokenOut}@${candidate.tokenOutContract}`,
-    `pools=${candidate.poolIds.join(",")}`,
+    `${action} ${tokenIn}@${tokenInContract}→${tokenOut}@${tokenOutContract}`,
+    `pools=${poolIds.join(",")}`,
     `netEdge=${typeof candidate.expectedNetEdgePct === "number" ? candidate.expectedNetEdgePct.toFixed(3) + "%" : "not supplied"}`,
   ];
 
   const params: Record<string, string> = {};
   if (action === "swap") {
-    params.tokenIn = candidate.tokenIn;
-    params.tokenOut = candidate.tokenOut;
+    params.tokenIn = tokenIn;
+    params.tokenOut = tokenOut;
   }
 
   return {

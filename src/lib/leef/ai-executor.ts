@@ -458,27 +458,39 @@ function choiceOf(
   qid: string,
 ): { choice: string; confidence: number } | null {
   const a = answers[qid];
-  if (!a || a.type !== "choice" || typeof a.choice !== "string") return null;
+  if (!a || a.type.trim().toLowerCase() !== "choice" || typeof a.choice !== "string") return null;
+  // TypeSafe providers may vary only in casing/whitespace or omit the scalar
+  // confidence while returning the selected choice's probability map.
+  const choice = a.choice.trim().toLowerCase();
+  const mappedConfidence = a.probabilities?.[choice];
+  const confidence = typeof a.confidence === "number"
+    ? a.confidence
+    : typeof mappedConfidence === "number"
+      ? mappedConfidence
+      : Number.NaN;
   if (
-    typeof a.confidence !== "number" ||
-    !Number.isFinite(a.confidence) ||
-    a.confidence < 0 ||
-    a.confidence > 1
+    !choice ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1
   ) return null;
-  return { choice: a.choice, confidence: a.confidence };
+  return { choice, confidence };
 }
 
 function noulOf(answers: JevAnswers, qid: string): number | null {
   const a = answers[qid];
+  if (!a || a.type.trim().toLowerCase() !== "noul") return null;
+  // The canonical gateway field is noul (P(true)); accept the equivalent
+  // boolean probability map used by some TypeSafe response adapters.
+  const mapped = a.probabilities?.true ?? a.probabilities?.yes ?? a.probabilities?.["1"];
+  const noul = typeof a.noul === "number" ? a.noul : mapped;
   if (
-    !a ||
-    a.type !== "noul" ||
-    typeof a.noul !== "number" ||
-    !Number.isFinite(a.noul) ||
-    a.noul < 0 ||
-    a.noul > 1
+    typeof noul !== "number" ||
+    !Number.isFinite(noul) ||
+    noul < 0 ||
+    noul > 1
   ) return null;
-  return a.noul;
+  return noul;
 }
 
 /**

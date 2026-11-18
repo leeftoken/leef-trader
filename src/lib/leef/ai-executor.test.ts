@@ -264,8 +264,12 @@ describe("isAiProposalFresh", () => {
   });
 
   it("rejects missing source metadata, future snapshots and stale market evidence", () => {
-    const p = parseAiProposal(answers())!;
-    expect(isAiProposalFresh(p, "1970-01-01T00:01:45.000Z", 106_000)).toBe(false);
+    const p = parseAiProposal(answers(0.9), context)!;
+    expect(isAiProposalFresh(
+      { ...p, snapshotFetchedAt: undefined },
+      "1970-01-01T00:01:45.000Z",
+      106_000,
+    )).toBe(false);
     const bound = parseAiProposal(answers(), context)!;
     expect(isAiProposalFresh(bound, "1970-01-01T00:04:00.000Z", 240_000)).toBe(false);
     expect(isAiProposalFresh(bound, "1970-01-01T00:01:45.000Z", 99_000)).toBe(false);

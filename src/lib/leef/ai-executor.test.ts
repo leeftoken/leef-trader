@@ -121,8 +121,8 @@ describe("buildAiQuestions", () => {
     expect(Object.keys(q)).toEqual([AI_QID.tradeDecision]);
     expect(q[AI_QID.tradeDecision]?.type).toBe("noul");
     expect(q[AI_QID.tradeDecision]?.instructions).toContain("state.candidate");
-    expect(q[AI_QID.tradeDecision]?.instructions).toContain("yes");
-    expect(q[AI_QID.tradeDecision]?.instructions).toContain("no");
+    expect(q[AI_QID.tradeDecision]?.instructions).toMatch(/YES/);
+    expect(q[AI_QID.tradeDecision]?.instructions).toMatch(/NO/);
   });
 
   it("uses the same single yes/no question for buy, swap and atomic arb candidates", () => {

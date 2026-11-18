@@ -634,32 +634,52 @@ const EXECUTION_IDENTITY_FIELDS = [
   "routeSig", "leefUsd", "waxUsd",
 ] as const;
 
+const REQUIRED_EXECUTION_IDENTITY_FIELDS = [
+  "action", "tokenIn", "tokenOut", "amountIn", "expectedOut",
+] as const;
+
 const EXECUTION_OUTCOME_FIELDS = [
   "actualOut", "pnlUsd", "realizedSlipPct", "platformFeeAmount",
   "platformFeeToken", "platformFeeCollected",
 ] as const;
 
-/** True only when records describe the same live execution and don't conflict on settled outcome data. */
+const isRecoverableLiveExecution = (entry: JournalEntry): boolean => (
+  entry.kind === "execution" &&
+  entry.mode === "live" &&
+  !!entry.txid &&
+  /^[a-f0-9]{64}$/i.test(entry.txid) &&
+  (entry.status === "unknown" || entry.status === "confirmed") &&
+  (entry.action === "buy" || entry.action === "sell" || entry.action === "swap" || entry.action === "arb") &&
+  typeof entry.tokenIn === "string" && entry.tokenIn.trim().length > 0 &&
+  typeof entry.tokenOut === "string" && entry.tokenOut.trim().length > 0 &&
+  Number.isFinite(entry.amountIn) && (entry.amountIn ?? 0) > 0 &&
+  Number.isFinite(entry.expectedOut) && (entry.expectedOut ?? 0) > 0
+);
+
+/** True only when records describe one live execution and have no conflicting outcome data. */
 export function areEquivalentLiveExecutionRows(entries: JournalEntry[]): boolean {
-  if (entries.length === 0) return false;
+  if (entries.length < 2) return false;
   const first = entries[0]!;
   if (
-    first.kind !== "execution" ||
-    first.mode !== "live" ||
-    !first.txid ||
-    !/^[a-f0-9]{64}$/i.test(first.txid) ||
+    !isRecoverableLiveExecution(first) ||
     entries.some((entry) =>
-      entry.kind !== "execution" ||
-      entry.mode !== "live" ||
-      entry.txid !== first.txid ||
-      (entry.status !== "unknown" && entry.status !== "confirmed")
+      !isRecoverableLiveExecution(entry) ||
+      entry.txid !== first.txid
     )
   ) return false;
 
+  // Core identity is mandatory; optional metadata may be absent from one
+  // duplicate because UNKNOWN and CONFIRMED rows are written by different
+  // code paths. When both have an optional value, it must agree exactly.
   const sameIdentity = entries.every((entry) =>
-    EXECUTION_IDENTITY_FIELDS.every((field) =>
-      JSON.stringify(entry[field]) === JSON.stringify(first[field])
-    )
+    REQUIRED_EXECUTION_IDENTITY_FIELDS.every((field) =>
+      Object.is(entry[field], first[field])
+    ) &&
+    EXECUTION_IDENTITY_FIELDS.every((field) => {
+      const left = entry[field];
+      const right = first[field];
+      return left == null || right == null || JSON.stringify(left) === JSON.stringify(right);
+    })
   );
   if (!sameIdentity) return false;
 
@@ -670,9 +690,8 @@ export function areEquivalentLiveExecutionRows(entries: JournalEntry[]): boolean
     return values.every((value) => {
       const firstValue = values[0];
       if (typeof value === "number" && typeof firstValue === "number") {
-        // Transfer amounts are decimal assets represented as IEEE-754 values.
-        // Different action ordering can change the final few binary bits; only
-        // tolerate sub-picounit drift, far below WAX's 1e-8 smallest unit.
+        // Asset amounts use IEEE-754 numbers. Permit only sub-picounit drift,
+        // vastly below WAX's 1e-8 smallest unit.
         return Math.abs(value - firstValue) <= 1e-12;
       }
       return Object.is(value, firstValue);
@@ -680,26 +699,42 @@ export function areEquivalentLiveExecutionRows(entries: JournalEntry[]): boolean
   });
 }
 
-/**
- * Select one logical execution for recovery. Prefer UNKNOWN because position
- * reconstruction requires it; otherwise a CONFIRMED row is usable only when
- * its transfer settlement was already recorded.
- */
+/** Select one logical live execution; ambiguous or incomplete records fail closed. */
 export function executionForRecovery(entries: JournalEntry[]): JournalEntry | null {
   if (entries.length === 0) return null;
   if (entries.length === 1) {
-    const entry = entries[0]!;
-    return entry.kind === "execution" &&
-      entry.mode === "live" &&
-      (entry.status === "unknown" || entry.status === "confirmed")
-      ? entry
-      : null;
+    return isRecoverableLiveExecution(entries[0]!) ? entries[0]! : null;
   }
   if (!areEquivalentLiveExecutionRows(entries)) return null;
   return entries.find((entry) => entry.status === "unknown") ??
     entries.find((entry) => entry.status === "confirmed") ??
     null;
 }
+
+/**
+ * True when the saved execution identity and any recorded realized output are
+ * consistent with confirmed chain transfers. This is used only as a fallback
+ * to release the trading lock if IndexedDB refuses the journal write; it does
+ * not mark the journal settled or manufacture an audit record.
+ */
+export async function liveExecutionOutcomeMatchesChain(
+  txid: string,
+  actualOut: number,
+): Promise<boolean> {
+  if (!/^[a-f0-9]{64}$/i.test(txid) || !Number.isFinite(actualOut)) return false;
+  try {
+    const entries = (await allEntries()).filter(
+      (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+    );
+    if (!executionForRecovery(entries)) return false;
+    return entries.every((entry) =>
+      entry.actualOut == null || Math.abs(entry.actualOut - actualOut) <= 1e-12
+    );
+  } catch {
+    return false;
+  }
+}
+
 
 /**
  * Resolve exactly one previously-unknown execution row after its chain
@@ -723,7 +758,7 @@ export async function settleUnknownExecution(
       selected.status === "confirmed" &&
       selected.reconciledAt != null
     ) {
-      return selected.actualOut == null || Object.is(selected.actualOut, actualOut);
+      return selected.actualOut == null || Math.abs(selected.actualOut - actualOut) <= 1e-12;
     }
 
     const db = await openDb();

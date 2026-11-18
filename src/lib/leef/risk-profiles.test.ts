@@ -19,7 +19,10 @@ describe("WAX micro active risk profile", () => {
   });
 
   it("keeps volume loss bounded and preserves account-level circuit breakers", () => {
-    expect(WAX_MICRO_ACTIVE_RISK.maxEchoLossPct).toBe(0.5);
+    // Must exceed the typical 0.6% combined cost of two 0.3% LP legs;
+    // the independent session echo budget still bounds cumulative loss.
+    expect(WAX_MICRO_ACTIVE_RISK.maxEchoLossPct).toBe(1.5);
+    expect(WAX_MICRO_ACTIVE_RISK.maxEchoLossPct).toBeGreaterThan(0.6);
     expect(WAX_MICRO_ACTIVE_RISK.echoBudgetUsd).toBe(DEFAULT_RISK.echoBudgetUsd);
     expect(WAX_MICRO_ACTIVE_RISK.echoBudgetUsd).toBeGreaterThan(0);
     expect(DEFAULT_GOALS.maxDrawdownPct).toBeGreaterThan(0);

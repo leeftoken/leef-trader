@@ -446,11 +446,6 @@ export function buildAiCandidateKey(
   return JSON.stringify(fingerprint);
 }
 
-/** Optional confidence-style transform for Noul P(yes), per TypeSafe semantics. */
-function noulConfidence(noul: number): number {
-  return Math.abs(2 * noul - 1);
-}
-
 function choiceOf(
   answers: JevAnswers,
   qid: string,

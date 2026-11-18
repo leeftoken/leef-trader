@@ -83,7 +83,7 @@ describe("Auto strategy WAX micro fallback", () => {
       cooldownUntil: 0,
       tradesThisHour: 0,
       sessionRealizedUsd: 0,
-      sessionStartEquityUsd: 1_000,
+      sessionStartEquityUsd: 1,
       echoCostUsd: 0,
       flowStates: null,
     });

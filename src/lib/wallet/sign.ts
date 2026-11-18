@@ -355,7 +355,7 @@ async function dispatchActions(opts: {
     ).response;
     const txid = response?.transaction_id ?? response?.processed?.id;
     if (!txid) {
-      markInterruptedSigning();
+      if (opts.botManaged) markInterruptedSigning();
       throw new TradeError(
         "TRANSACTION_UNKNOWN",
         "External wallet completed without returning a transaction id. Inspect account history before another live trade.",

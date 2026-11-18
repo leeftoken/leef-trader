@@ -667,7 +667,16 @@ export function areEquivalentLiveExecutionRows(entries: JournalEntry[]): boolean
     const values = entries
       .map((entry) => entry[field])
       .filter((value) => value !== undefined && value !== null);
-    return values.every((value) => Object.is(value, values[0]));
+    return values.every((value) => {
+      const firstValue = values[0];
+      if (typeof value === "number" && typeof firstValue === "number") {
+        // Transfer amounts are decimal assets represented as IEEE-754 values.
+        // Different action ordering can change the final few binary bits; only
+        // tolerate sub-picounit drift, far below WAX's 1e-8 smallest unit.
+        return Math.abs(value - firstValue) <= 1e-12;
+      }
+      return Object.is(value, firstValue);
+    });
   });
 }
 
@@ -746,7 +755,7 @@ export async function settleUnknownExecution(
           const knownOutputs = current
             .map((entry) => entry.actualOut)
             .filter((value): value is number => value != null);
-          if (knownOutputs.some((value) => !Object.is(value, actualOut))) {
+          if (knownOutputs.some((value) => Math.abs(value - actualOut) > 1e-12)) {
             tx.abort();
             return;
           }

@@ -3,6 +3,7 @@ import {
   TRADE_CYCLE_STORAGE_KEY,
   abortSigning,
   beginSigning,
+  canConfirmInterruptedSigningNoBroadcast,
   confirmInterruptedSigningNoBroadcast,
   liveCapitalBlocked,
   markBroadcast,
@@ -11,6 +12,7 @@ import {
   markUnknown,
   pendingTxid,
   restoreTradeCycleLock,
+  tradeAccount,
   tradePhase,
   unknownBlockReason,
 } from "./trade-cycle";
@@ -47,13 +49,25 @@ describe("live capital lock", () => {
   });
 
   it("releases only a txid-less interrupted lock after explicit wallet-history review", () => {
-    expect(beginSigning()).toBe(true);
+    expect(beginSigning("leefuser")).toBe(true);
     expect(restoreTradeCycleLock()).toBe("blocked");
+    expect(tradeAccount()).toBe("leefuser");
 
-    expect(confirmInterruptedSigningNoBroadcast()).toBe(true);
+    expect(confirmInterruptedSigningNoBroadcast("leefuser")).toBe(true);
     expect(tradePhase()).toBe("idle");
     expect(liveCapitalBlocked()).toBe(false);
     expect(localStorage.getItem(TRADE_CYCLE_STORAGE_KEY)).toBeNull();
+  });
+
+
+  it("requires the same wallet account before releasing an interrupted lock", () => {
+    expect(beginSigning("leefuser")).toBe(true);
+    expect(restoreTradeCycleLock()).toBe("blocked");
+
+    expect(canConfirmInterruptedSigningNoBroadcast("anotheruser")).toBe(false);
+    expect(confirmInterruptedSigningNoBroadcast("anotheruser")).toBe(false);
+    expect(liveCapitalBlocked()).toBe(true);
+    expect(canConfirmInterruptedSigningNoBroadcast("leefuser")).toBe(true);
   });
 
   it("cannot clear an unresolved transaction that already has a txid", () => {

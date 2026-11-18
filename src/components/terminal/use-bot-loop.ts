@@ -82,6 +82,7 @@ import {
   markTradeStateApplied,
   pendingTxid,
   tradeAccount,
+  tradePhase,
   tradeIntent as persistedTradeIntent,
   type BotTradeIntent,
   recordCycleTimings,
@@ -535,16 +536,10 @@ async function releaseBotCapitalAfterJournal(
     return true;
   }
 
+  // Do not synthesize a second row from the intent in the hot execution
+  // path. A failed durability check remains locked and is handled by the
+  // explicit UNKNOWN recovery path after the normal execution cycle ends.
   markUnknown(txid);
-  // Recreate from the persisted intent only after distinguishing whether bot
-  // state was already applied. A stateApplied intent restores a confirmed
-  // row and can release here without running the position mutation twice.
-  const intent = persistedTradeIntent();
-  const restored = await ensureUnknownExecutionJournal(txid, intent);
-  if (restored && intent?.stateApplied) {
-    markConfirmed(txid);
-    return true;
-  }
   return false;
 }
 
@@ -876,11 +871,26 @@ function retainUnknownBroadcast(input: UnknownBroadcastExecution): boolean {
 
 const unknownJournalRestoreInFlight = new Set<string>();
 
+/** Only an UNKNOWN lock may enter reload recovery; active broadcasts own their journal write. */
+export function shouldResumeUnknownTradeRecovery(phase: string): boolean {
+  return phase === "unknown";
+}
 
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
   const txid = pendingTxid();
-  if (!txid || !account || !useWallet.getState().canSign() || unknownJournalRestoreInFlight.has(txid)) return;
+  // A pending txid also exists during the normal live signing/broadcast path.
+  // Restoring an UNKNOWN journal row before that path writes its confirmed
+  // execution creates a duplicate txid record and permanently trips the
+  // uniqueness guard. Reloaded locks are normalized to "unknown", so only
+  // that phase is eligible for automatic recovery.
+  if (
+    !txid ||
+    !shouldResumeUnknownTradeRecovery(tradePhase()) ||
+    !account ||
+    !useWallet.getState().canSign() ||
+    unknownJournalRestoreInFlight.has(txid)
+  ) return;
   const lockedAccount = tradeAccount();
   if (lockedAccount && lockedAccount !== account) {
     useBot.getState().setLastReason(

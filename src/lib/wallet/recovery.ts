@@ -263,14 +263,12 @@ export function assessUnknownExecution(
     const previous = context.position;
     const buyCostUsd = quoteUsd == null ? null : grossQuoteSent * quoteUsd;
     const feeCostUsd = quoteUsd == null ? null : feeAmount * quoteUsd;
-    let nextPosition: Position | null = previous;
-    let realizedCostUsd = buyCostUsd;
-    let residualQuote = 0;
-    let residualCostUsd = 0;
+    let nextPosition: Position | null;
+    let realizedCostUsd: number | null;
 
     if (baseDelta > rawUnit) {
-      residualQuote = grossQuoteSent * (baseDelta / grossBaseBought);
-      residualCostUsd = (buyCostUsd ?? 0) * (baseDelta / grossBaseBought);
+      const residualQuote = grossQuoteSent * (baseDelta / grossBaseBought);
+      const residualCostUsd = (buyCostUsd ?? 0) * (baseDelta / grossBaseBought);
       const totalAmount = (previous?.amountLeef ?? 0) + baseDelta;
       const totalCostUsd = (previous?.entryCostUsd ?? 0) + residualCostUsd;
       const totalQuote = (previous?.entryWax ?? 0) + residualQuote;

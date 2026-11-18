@@ -426,7 +426,7 @@ export function toNdjson(entries: JournalEntry[]): string {
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 let buffer: JournalEntry[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let flushing = false;
+let flushInFlight: Promise<void> | null = null;
 let lastPruneCheck = 0;
 let listenersArmed = false;
 
@@ -520,31 +520,45 @@ export async function flushJournal(): Promise<void> {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  if (flushing || buffer.length === 0) return;
+
+  // A read-after-write caller must wait for the active IndexedDB transaction.
+  // Returning immediately while another flush is running lets journalAll()
+  // observe stale rows and incorrectly trigger UNKNOWN recovery.
+  if (flushInFlight) {
+    await flushInFlight;
+    if (buffer.length > 0) await flushJournal();
+    return;
+  }
+  if (buffer.length === 0) return;
+
   const batch = buffer;
   buffer = [];
-  flushing = true;
-  try {
-    const db = await openDb();
-    if (!db) return;
-    await new Promise<void>((resolve) => {
-      try {
-        const tx = db.transaction(STORE, "readwrite");
-        const store = tx.objectStore(STORE);
-        for (const e of batch) store.add(e);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => resolve();
-        tx.onabort = () => resolve();
-      } catch {
-        resolve();
-      }
-    });
-    await maybePrune(db);
-  } catch {
-    /* ignore */
-  } finally {
-    flushing = false;
-  }
+  flushInFlight = (async () => {
+    try {
+      const db = await openDb();
+      if (!db) return;
+      await new Promise<void>((resolve) => {
+        try {
+          const tx = db.transaction(STORE, "readwrite");
+          const store = tx.objectStore(STORE);
+          for (const e of batch) store.add(e);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+          tx.onabort = () => resolve();
+        } catch {
+          resolve();
+        }
+      });
+      await maybePrune(db);
+    } catch {
+      /* ignore */
+    } finally {
+      flushInFlight = null;
+    }
+  })();
+
+  await flushInFlight;
+  if (buffer.length > 0) await flushJournal();
 }
 
 async function maybePrune(db: IDBDatabase): Promise<void> {

@@ -48,7 +48,7 @@ import {
   suggestPair,
   type AdvisorSuggestion,
 } from "@/lib/leef/advisor";
-import { runBotOnce } from "./use-bot-loop";
+import { resumeUnknownTradeRecovery, runBotOnce } from "./use-bot-loop";
 import {
   GROWTH_MODES,
   listTreasureTokens,
@@ -96,6 +96,11 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const paperFaucet = useWallet((s) => s.paperFaucet);
   const account = useWallet((s) => s.account);
   const authType = useWallet((s) => s.authType);
+  // A persisted UNKNOWN lock must resume read-only reconciliation after reload;
+  // otherwise the user is forced to press Inspect & reconcile every time.
+  useEffect(() => {
+    if (mode === "live" && account) resumeUnknownTradeRecovery(snap, account);
+  }, [mode, account, snap]);
   const setImportOpen = useWallet((s) => s.setImportOpen);
   const paperBalances = useWallet((s) => s.paperBalances);
   const liveBalances = useWallet((s) => s.liveBalances);

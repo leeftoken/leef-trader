@@ -173,6 +173,18 @@ describe("duplicate live execution recovery", () => {
     expect(executionForRecovery([unknown, confirmed])).toEqual(unknown);
   });
 
+  it("accepts sub-unit floating-point drift in transfer-derived outcomes", async () => {
+    const { executionForRecovery } = await import("./journal");
+    const unknown = liveExecution({ ts: 1_000, status: "unknown" });
+    const confirmed = liveExecution({
+      ts: 1_001,
+      status: "confirmed",
+      actualOut: -0.04998575000000001,
+      reconciledAt: 1_002,
+    });
+    expect(executionForRecovery([unknown, confirmed])).toEqual(unknown);
+  });
+
   it("rejects duplicates whose trade identity differs", async () => {
     const { executionForRecovery } = await import("./journal");
     const unknown = liveExecution({ ts: 1_000, status: "unknown" });

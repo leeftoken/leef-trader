@@ -931,7 +931,7 @@ function scoreBuyOpportunity(opts: {
 }
 
 function scoreTapeVolumeOpportunity(opts: {
-  tape: ReturnType<typeof planLeefTape> & {};
+  tape: NonNullable<ReturnType<typeof planLeefTape>>;
   quoteAgeMs: number;
   maxQuoteAgeMs: number;
   snap: LeefSnapshot;

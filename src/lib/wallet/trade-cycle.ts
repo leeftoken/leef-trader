@@ -274,6 +274,9 @@ export function liveCapitalBlocked(): boolean {
 export function beginSigning(account?: string, intent?: BotTradeIntent): boolean {
   if (liveCapitalBlocked()) return false;
   const normalizedIntent = normalizeTradeIntent(intent);
+  // A bot-managed caller supplies intent; reject malformed metadata before
+  // signing rather than create a broadcast that cannot be reconstructed safely.
+  if (intent !== undefined && !normalizedIntent) return false;
   lock = {
     phase: "signing",
     ...(account?.trim() ? { account: account.trim() } : {}),

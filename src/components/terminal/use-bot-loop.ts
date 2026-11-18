@@ -651,7 +651,7 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
       if (pendingTxid() !== txid) return;
 
       if (rec.status === "failed") {
-        markFailed();
+        markFailed(txid);
         useBot.getState().setLastReason(
           `Transaction ${txid.slice(0, 10)}… was independently confirmed failed on-chain; no fill was booked.`,
         );
@@ -727,7 +727,7 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
         return;
       }
 
-      markConfirmed();
+      markConfirmed(txid);
       useBot.getState().setLastReason(
         `Transaction ${txid.slice(0, 10)}… automatically reconciled from confirmed chain transfers. Live trading can resume; historical P&L was not estimated.`,
       );
@@ -2136,7 +2136,7 @@ async function runBotOnceInner(
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           timings.confirmationMs = Date.now() - tConf;
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2150,7 +2150,7 @@ async function runBotOnceInner(
               quoteSpent = -spent;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed();
+              markConfirmed(txid);
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
@@ -2348,7 +2348,7 @@ async function runBotOnceInner(
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           timings.confirmationMs = Date.now() - tConf;
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2360,7 +2360,7 @@ async function runBotOnceInner(
               quoteOut = actualOut;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed();
+              markConfirmed(txid);
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
@@ -2535,7 +2535,7 @@ async function runBotOnceInner(
           if (exec.expectedOut > 0) outAmt = exec.expectedOut;
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2545,7 +2545,7 @@ async function runBotOnceInner(
             const actualOut = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
             if (actualIn < 0 && actualOut > 0) {
               outAmt = actualOut;
-              markConfirmed();
+              markConfirmed(txid);
               note = " · confirmed on-chain";
               execStatus = "confirmed";
             } else {
@@ -2777,7 +2777,7 @@ async function runBotOnceInner(
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           timings.confirmationMs = Date.now() - tConf;
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2787,7 +2787,7 @@ async function runBotOnceInner(
               realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed();
+              markConfirmed(txid);
             } else {
               markUnknown(txid);
               note = " · quote-token transfers are incomplete";

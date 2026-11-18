@@ -59,6 +59,28 @@ describe("assessUnknownExecution", () => {
     });
   });
 
+  it("recovers a split multi-hop Alcor buy and subtracts the separately paid base-token fee", () => {
+    const buy = execution({
+      amountIn: 52.68858121,
+      sizeUsd: 5.268858121,
+    });
+    const transfers: TxTransfer[] = [
+      { contract: "eosio.token", from: account, to: "swap.alcor", quantity: "26.87117642 WAX", amount: 26.87117642, symbol: "WAX", memo: "swapexactin#12840" },
+      { contract: "eosio.token", from: account, to: "swap.alcor", quantity: "25.81740479 WAX", amount: 25.81740479, symbol: "WAX", memo: "swapexactin#12361,13266" },
+      { contract: "leefmaincorp", from: "swap.alcor", to: account, quantity: "570082.4901 LEEF", amount: 570082.4901, symbol: "LEEF", memo: "Swap tokenOut - Pool ID #12840" },
+      { contract: "leefmaincorp", from: "swap.alcor", to: account, quantity: "547759.9849 LEEF", amount: 547759.9849, symbol: "LEEF", memo: "Swap tokenOut - Pool ID #13266" },
+      { contract: "leefmaincorp", from: account, to: "smart.ass", quantity: "10.8528 LEEF", amount: 10.8528, symbol: "LEEF", memo: "leef-trader platform fee (0.001%)" },
+    ];
+    const result = assessUnknownExecution(buy, transfers, context);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.actualIn).toBeCloseTo(-52.68858121, 8);
+    expect(result.actualOut).toBeCloseTo(1117831.6222, 4);
+    expect(result.nextPosition?.amountLeef).toBeCloseTo(1117831.6222, 4);
+    expect(result.nextPosition?.entryWax).toBeCloseTo(52.68858121, 8);
+    expect(result.nextPosition?.entryCostUsd).toBeCloseTo(5.268858121, 8);
+  });
+
   it("does not recover a buy with a partial or mismatched input debit", () => {
     const result = assessUnknownExecution(
       execution({}),

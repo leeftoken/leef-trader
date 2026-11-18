@@ -219,6 +219,43 @@ describe("Hyperion notification de-duplication", () => {
     },
   };
 
+  it("preserves separate root transfers with creator ordinal zero and removes their notification copies", () => {
+    const rootOne = {
+      action_ordinal: 1,
+      creator_action_ordinal: 0,
+      act: {
+        account: "eosio.token",
+        name: "transfer",
+        data: { from: ACCOUNT, to: "swap.alcor", quantity: "26.87117642 WAX", memo: "route one" },
+      },
+    };
+    const rootTwo = {
+      action_ordinal: 2,
+      creator_action_ordinal: 0,
+      act: {
+        account: "eosio.token",
+        name: "transfer",
+        data: { from: ACCOUNT, to: "swap.alcor", quantity: "25.81740479 WAX", memo: "route two" },
+      },
+    };
+    const notificationOne = {
+      action_ordinal: 5,
+      creator_action_ordinal: 1,
+      act: rootOne.act,
+    };
+    const notificationTwo = {
+      action_ordinal: 11,
+      creator_action_ordinal: 2,
+      act: rootTwo.act,
+    };
+    const parsed = parseHyperionTransfers({
+      executed: true,
+      actions: [notificationOne, notificationTwo, rootTwo, rootOne],
+    });
+    expect(parsed?.transfers).toHaveLength(2);
+    expect(assetDelta(parsed!.transfers, ACCOUNT, "WAX", "eosio.token")).toBeCloseTo(-52.68858121, 8);
+  });
+
   it("collapses notification documents sharing a creator_action_ordinal", () => {
     const parsed = parseHyperionTransfers({
       executed: true,

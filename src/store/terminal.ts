@@ -7,7 +7,7 @@ import { setLearningModeProvider } from "@/lib/leef/learning-store";
 /** Book-pull cadence. Live = 10s — fastest that stays polite to Alcor. */
 export const MIN_SYNC_SEC = 10;
 export const MAX_SYNC_SEC = 60;
-export const DEFAULT_SYNC_SEC = 30;
+export const DEFAULT_SYNC_SEC = 10;
 
 export function clampSyncSec(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_SYNC_SEC;
@@ -181,15 +181,16 @@ export const useTerminal = create<TerminalState>()(
     }),
     {
       name: "leef-terminal-sync",
-      version: 3,
+      version: 4,
       // v2 → v3: Jev CONTROL becomes session-only. Reset any previously
       // persisted authority to OFF so a browser upgrade/reload cannot retain
       // a prior live-trading authorization.
-      migrate: (persisted): PersistedTerminalState => {
-        // Strip the v2 authorization field. The unpersisted store default is
-        // OFF, so rehydration cannot restore prior live-trading authority.
+      // v3 → v4: default WAX book cadence to 10s, the fastest supported
+      // interval considered polite to Alcor. Preserve custom cadences.
+      migrate: (persisted, version): PersistedTerminalState => {
         const migrated = { ...(persisted as object) } as Record<string, unknown>;
         delete migrated.aiControl;
+        if (version < 4 && migrated.syncSec === 30) migrated.syncSec = DEFAULT_SYNC_SEC;
         return migrated as PersistedTerminalState;
       },
       partialize: (s) => ({

@@ -76,17 +76,10 @@ export const AI_EXEC_CONFIDENCE_MIN = 0.75;
 export const AI_PROPOSAL_MAX_AGE_MS = 120_000;
 export const AI_RESPONSE_MAX_LATENCY_MS = 35_000;
 
-/** Question ids — parseAiProposal relies on these exact keys. */
+/** The only TypeSafe field: P(yes) = approve this exact candidate. */
 export const AI_QID = {
-  action: "action",
-  sizeBucket: "size_bucket",
-  riskStress: "risk_stress",
-  riskExecute: "risk_execute",
+  tradeDecision: "trade_decision",
 } as const;
-
-const AI_ACTIONS: AiAction[] = ["hold", "buy", "swap", "arb"];
-
-export const SIZE_BUCKET_PCT: Record<string, number> = { quarter: 25, half: 50, full: 100 };
 
 /** Terse market/account summary sent as Jev state. No secrets, keys or memos. */
 export interface AiSnapshotSummary {
@@ -349,69 +342,44 @@ export function aiSummaryOf(
  * actually execute; unsupported rebalancing/cancel actions are not offered.
  */
 export function buildAiQuestions(summary: AiSnapshotSummary): Record<string, JevQuestion> {
-  const actionCriteria: Record<string, string> = {
-    hold: "Reject this candidate and do nothing this cycle.",
-  };
-  if (summary.allowedActions.includes("buy")) {
-    actionCriteria.buy = "Accept the deterministic engine's already-generated buy candidate. Do not change its token pair or invent a route.";
-  }
-  if (summary.allowedActions.includes("swap")) {
-    actionCriteria.swap = "Accept the deterministic engine's already-generated swap candidate. Do not change its token pair or invent a route.";
-  }
-  if (summary.allowedActions.includes("arb")) {
-    actionCriteria.arb = "Accept the deterministic engine's already-generated atomic quote→base→quote round-trip. Judge its exact input amount, expected return, pool IDs, impact and bounded volume/profit intent. Do not change its size, route, pools or tokens, and do not invent another trade.";
-  }
+  const action = summary.candidateKind === "preview"
+    ? "buy"
+    : summary.candidateKind;
+  const hasOneExecutableAction =
+    (action === "buy" || action === "swap" || action === "arb") &&
+    summary.allowedActions.filter((a) => a !== "hold").length === 1 &&
+    summary.allowedActions.includes(action);
 
-  const questions: Record<string, JevQuestion> = {
-    [AI_QID.action]: {
-      type: "choice",
-      instructions:
-        "Judge ONLY state.candidate, the deterministic engine's already-generated candidate. Evaluate its exact token pair and contract identities, input amount and USD notional, expected output/net edge, price impact, pool liquidity, pool IDs and hop count together with state.market, balances and position details. Choose hold to reject it or the matching candidate action to accept it. For buy/swap only, choose a supplied size bucket that can only reduce the candidate. For arb, accept or reject the atomic round-trip exactly as supplied; do not resize it. Never invent a trade, change the candidate type, token pair or route. The engine retains route and execution authority.",
-      criteria: actionCriteria,
-    },
-    [AI_QID.riskStress]: {
+  const actionDescription = action === "arb"
+    ? "the exact atomic quote→base→quote arbitrage"
+    : action === "swap"
+      ? "the exact inventory swap"
+      : "the exact directional buy";
+
+  return {
+    [AI_QID.tradeDecision]: {
       type: "noul",
       instructions:
-        "Is the market under acute stress RIGHT NOW such that this candidate should be rejected? Consider state.market.regime, volatilityPct, poolDislocationPct, dangerScore, liquidity and recent failures.",
+        "Return YES only if the exact candidate in state.candidate should execute NOW. " +
+        "Return NO if its expected net result after LP/platform fees, price impact, liquidity, " +
+        "route complexity, pool concentration, market regime, price freshness, wallet/position " +
+        "limits or recent execution evidence makes it unattractive or unsafe. " +
+        "This is a WAX micro-liquidity market: small positive net opportunities can be valid; " +
+        "do not apply large-chain volume/liquidity assumptions. But never approve a route whose " +
+        "economics are negative merely to print volume. Consider the LEEF pool and multi-pool " +
+        "routing context shown, but judge only this one code-generated candidate. " +
+        `The only allowed candidate action is ${hasOneExecutableAction ? action : "none"} (${actionDescription}). ` +
+        "Do not invent trades, change token contracts, resize the amount, select different pools, " +
+        "change route hops, or sign anything. Missing, stale, contradictory or incomplete evidence means NO. " +
+        "The deterministic engine and exact venue/risk gates remain authoritative.",
       criteria: {
-        true: "Clear evidence of acute stress, cascade risk, dislocation or broken liquidity.",
-        false: "Market is orderly enough for its observed liquidity and regime.",
-      },
-    },
-    [AI_QID.riskExecute]: {
-      type: "noul",
-      instructions:
-        "Is the supplied market, portfolio and token-universe evidence coherent and fresh enough to evaluate this candidate? Treat missing, stale, contradictory or ambiguous evidence as unsafe.",
-      criteria: {
-        true: "Evidence is coherent and fresh enough for a decision.",
-        false: "Evidence is stale, incomplete, contradictory or unsafe to act on.",
+        true: "YES — this exact candidate is worth attempting on its current evidence and bounded economics.",
+        false: "NO — reject this candidate; do not trade this cycle.",
       },
     },
   };
-
-  if (summary.allowedActions.includes("buy") || summary.allowedActions.includes("swap")) {
-    questions[AI_QID.sizeBucket] = {
-      type: "choice",
-      instructions:
-        "IF the candidate is accepted, choose the fraction of its deployable input balance to request. The deterministic governor may reduce it further.",
-      criteria: {
-        quarter: "25% — cautious clip.",
-        half: "50% — moderate clip.",
-        full: "100% — full deployable amount, still subject to deterministic limits.",
-      },
-    };
-  }
-  return questions;
 }
 
-/**
- * Stable, exact identity for the deterministic candidate Jev judged.
- *
- * Amount-independent route signatures are useful for route caching, but are
- * not sufficient authorization identities. Bind a Jev proposal to every
- * execution-relevant candidate field so an approval cannot be replayed for a
- * different clip, token contract, output estimate, edge, impact or path.
- */
 export function buildAiCandidateKey(
   strategy: string,
   kind: AiCandidateKind,
@@ -446,36 +414,6 @@ export function buildAiCandidateKey(
   return JSON.stringify(fingerprint);
 }
 
-function choiceOf(
-  answers: JevAnswers,
-  qid: string,
-): { choice: string; confidence: number } | null {
-  const a = answers[qid];
-  if (!a || a.type.trim().toLowerCase() !== "choice" || typeof a.choice !== "string") return null;
-  // TypeSafe providers may vary only in casing/whitespace or omit the scalar
-  // confidence while returning the selected choice's probability map.
-  const choice = a.choice.trim().toLowerCase();
-  const distribution = a.probabilities ? Object.values(a.probabilities) : [];
-  const distributionValid =
-    distribution.length >= 2 &&
-    distribution.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
-    Math.abs(distribution.reduce((sum, p) => sum + p, 0) - 1) <= 0.02;
-  const peak = distributionValid ? Math.max(...distribution) : Number.NaN;
-  const derivedConfidence = distributionValid
-    ? (peak - 1 / distribution.length) / (1 - 1 / distribution.length)
-    : Number.NaN;
-  const confidence = typeof a.confidence === "number"
-    ? a.confidence
-    : derivedConfidence;
-  if (
-    !choice ||
-    !Number.isFinite(confidence) ||
-    confidence < 0 ||
-    confidence > 1
-  ) return null;
-  return { choice, confidence };
-}
-
 function noulOf(answers: JevAnswers, qid: string): number | null {
   const a = answers[qid];
   if (!a || a.type.trim().toLowerCase() !== "noul") return null;
@@ -502,108 +440,93 @@ export function parseAiProposal(
   answers: JevAnswers,
   context?: AiProposalContext,
 ): AiProposal | null {
-  if (!answers || typeof answers !== "object") return null;
-  const actionAns = choiceOf(answers, AI_QID.action);
-  if (!actionAns || !(AI_ACTIONS as string[]).includes(actionAns.choice)) return null;
-  const action = actionAns.choice as AiAction;
-  if (context && !context.allowedActions.includes(action)) return null;
+  if (!context || !answers || typeof answers !== "object") return null;
+
+  const probabilityYes = noulOf(answers, AI_QID.tradeDecision);
+  if (probabilityYes == null) return null;
+
+  // One candidate, one allowed action. Jev cannot select an action, size,
+  // route or token pair; it only approves/rejects the deterministic candidate.
+  const candidate = context.candidate;
+  const action: AiAction = context.candidateKind === "preview" || context.candidateKind === "buy"
+    ? "buy"
+    : context.candidateKind === "swap"
+      ? "swap"
+      : context.candidateKind === "arb"
+        ? "arb"
+        : "hold";
+  const allowed = context.allowedActions.filter((item) => item !== "hold");
   if (
-    context &&
-    action !== "hold" &&
-    context.candidateKind !== "preview" &&
-    action !== context.candidateKind
+    (action !== "buy" && action !== "swap" && action !== "arb") ||
+    allowed.length !== 1 ||
+    allowed[0] !== action ||
+    candidate.kind !== context.candidateKind ||
+    candidate.key !== context.candidateKey
   ) return null;
 
-  const execOk = noulOf(answers, AI_QID.riskExecute);
-  const stress = noulOf(answers, AI_QID.riskStress);
-  if (execOk == null || stress == null) return null;
-
-  // The action Choice confidence is the decision confidence. Noul values
-  // are direct P(yes) safety probabilities and are gated below as probabilities;
-  // they must not be converted into generic confidence and mixed with Choice.
-  // The size bucket is a bounded sizing preference, not an authorization signal.
-  const judgments: { qid: string; confidence: number }[] = [
-    { qid: AI_QID.action, confidence: actionAns.confidence },
-  ];
-  const params: Record<string, string> = {};
-  const rationale: string[] = ["action=" + action + " p=" + actionAns.confidence.toFixed(2)];
-
-  if (action !== "hold") {
-    // Acting on incoherent data is never usable. Exits still require coherent data.
-    if (execOk < 0.5) return null;
-  }
-  if (action === "buy" || action === "swap" || action === "arb") {
-    // Acute stress vetoes entries, discretionary swaps and atomic round-trips.
-    if (stress > 0.5) return null;
-  }
-  if (action === "buy" || action === "swap") {
-    const size = choiceOf(answers, AI_QID.sizeBucket);
-    if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
-    params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);
-    rationale.push("size=" + size.choice + " p=" + size.confidence.toFixed(2));
-  }
-
-  if (action === "swap") {
-    // The token pair belongs to the deterministic candidate, never to Jev.
-    const candidate = context?.candidate;
-    if (
-      !candidate?.tokenIn ||
-      !candidate.tokenInContract ||
-      !candidate.tokenOut ||
-      !candidate.tokenOutContract ||
-      candidate.tokenIn === candidate.tokenOut ||
-      candidate.tokenInContract === candidate.tokenOutContract
-    ) return null;
-    params.tokenIn = candidate.tokenIn;
-    params.tokenOut = candidate.tokenOut;
-    rationale.push(candidate.tokenIn + "→" + candidate.tokenOut);
-  }
+  const finitePositive = (value: unknown): value is number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0;
+  const tokenIn = candidate.tokenIn;
+  const tokenInContract = candidate.tokenInContract;
+  const tokenOut = candidate.tokenOut;
+  const tokenOutContract = candidate.tokenOutContract;
+  const poolIds = candidate.poolIds;
+  const hops = candidate.hops;
+  if (
+    typeof tokenIn !== "string" || !tokenIn.trim() ||
+    typeof tokenInContract !== "string" || !tokenInContract.trim() ||
+    typeof tokenOut !== "string" || !tokenOut.trim() ||
+    typeof tokenOutContract !== "string" || !tokenOutContract.trim() ||
+    !Array.isArray(poolIds) || poolIds.length === 0 ||
+    !poolIds.every((id) => Number.isInteger(id) && id >= 0) ||
+    typeof hops !== "number" || !Number.isInteger(hops) || hops <= 0 ||
+    !finitePositive(candidate.amountIn) || !finitePositive(candidate.expectedOut)
+  ) return null;
 
   if (action === "arb") {
-    // An atomic round-trip is a code-owned candidate, not a model-authored route.
-    // It intentionally uses the same quote token on input and output, and it
-    // keeps the deterministic engine's already-selected size (no Jev resizing).
-    const candidate = context?.candidate;
     if (
-      context?.candidateKind !== "arb" ||
-      candidate?.kind !== "arb" ||
       (candidate.arbKind !== "volume" && candidate.arbKind !== "spread") ||
-      !candidate.tokenIn ||
-      !candidate.tokenInContract ||
-      candidate.tokenIn !== candidate.tokenOut ||
-      candidate.tokenInContract !== candidate.tokenOutContract ||
-      !(typeof candidate.amountIn === "number" && Number.isFinite(candidate.amountIn) && candidate.amountIn > 0) ||
-      !(typeof candidate.expectedOut === "number" && Number.isFinite(candidate.expectedOut) && candidate.expectedOut > 0) ||
-      !Array.isArray(candidate.poolIds) ||
-      candidate.poolIds.length === 0 ||
-      !candidate.poolIds.every((id) => Number.isInteger(id) && id >= 0) ||
-      !(typeof candidate.hops === "number" && Number.isInteger(candidate.hops) && candidate.hops > 0)
+      tokenIn.toUpperCase() !== tokenOut.toUpperCase() ||
+      tokenInContract.toLowerCase() !== tokenOutContract.toLowerCase() ||
+      poolIds.length < 2 ||
+      hops < 2
     ) return null;
-    rationale.push(`atomic ${candidate.arbKind} ${candidate.tokenIn} round-trip`);
+  } else if (
+    tokenIn.toUpperCase() === tokenOut.toUpperCase() ||
+    tokenInContract.toLowerCase() === tokenOutContract.toLowerCase()
+  ) {
+    return null;
   }
 
-  rationale.push("exec_ok=" + execOk.toFixed(2), "stress=" + stress.toFixed(2));
-  let weakest = judgments[0]!;
-  for (const j of judgments) if (j.confidence < weakest.confidence) weakest = j;
+  const approved = probabilityYes >= AI_EXEC_CONFIDENCE_MIN;
+  const selectedAction: AiAction = approved ? action : "hold";
+  const rationale = [
+    `trade=${approved ? "yes" : "no"} p=${probabilityYes.toFixed(2)}`,
+    `${action} ${tokenIn}@${tokenInContract}→${tokenOut}@${tokenOutContract}`,
+    `pools=${poolIds.join(",")}`,
+    `netEdge=${typeof candidate.expectedNetEdgePct === "number" ? candidate.expectedNetEdgePct.toFixed(3) + "%" : "not supplied"}`,
+  ];
+
+  const params: Record<string, string> = {};
+  if (action === "swap") {
+    params.tokenIn = tokenIn;
+    params.tokenOut = tokenOut;
+  }
 
   return {
-    action,
+    action: selectedAction,
     params,
-    confidence: weakest.confidence,
-    weakest: weakest.qid,
+    confidence: approved ? probabilityYes : 1 - probabilityYes,
+    weakest: AI_QID.tradeDecision,
     answers,
     rationale: rationale.join(" · "),
-    fetchedAt: context?.receivedAt ?? Date.now(),
-    ...(context
-      ? {
-          snapshotFetchedAt: context.snapshotFetchedAt,
-          requestedAt: context.requestedAt,
-          model: context.model,
-          candidateKind: context.candidateKind,
-          candidateKey: context.candidateKey,
-          candidate: context.candidate,
-        }
-      : {}),
+    fetchedAt: context.receivedAt,
+    snapshotFetchedAt: context.snapshotFetchedAt,
+    requestedAt: context.requestedAt,
+    model: context.model,
+    candidateKind: context.candidateKind,
+    candidateKey: context.candidateKey,
+    candidate,
   };
 }
 

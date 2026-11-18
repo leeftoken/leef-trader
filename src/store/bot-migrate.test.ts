@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_RISK } from "@/lib/leef/bot-engine";
 import { useBot } from "./bot";
 
 type Migrated = {
@@ -28,6 +29,35 @@ describe("bot store v14 migration", () => {
     expect(out.risk.maxPoolSharePct).toBe(5);
     expect(out.risk.maxImpactPct).toBe(2);
     expect(out.riskMigrationNotice).toMatch(/Safer risk defaults/);
+  });
+
+  it("v15 untouched WAX defaults migrate to the bounded active micro profile", () => {
+    const out = migrate(
+      {
+        base: "LEEF",
+        quote: "WAX",
+        risk: { ...DEFAULT_RISK },
+      },
+      15,
+    );
+    expect(out.risk.maxTradesHour).toBe(60);
+    expect(out.risk.cooldownSec).toBe(10);
+    expect(out.risk.maxImpactPct).toBe(4);
+    expect(out.risk.maxPoolSharePct).toBe(7.5);
+    expect(out.riskMigrationNotice).toMatch(/WAX Micro Active profile applied/);
+  });
+
+  it("does not overwrite a customized legacy WAX risk profile", () => {
+    const out = migrate(
+      {
+        base: "LEEF",
+        quote: "WAX",
+        risk: { ...DEFAULT_RISK, cooldownSec: 45 },
+      },
+      15,
+    );
+    expect(out.risk.maxTradesHour).toBe(20);
+    expect(out.risk.cooldownSec).toBe(45);
   });
 
   it("v13 history keeps realized dollars but resets unreliable win-rate counters", () => {

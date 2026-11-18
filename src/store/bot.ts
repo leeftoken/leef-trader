@@ -12,6 +12,10 @@ import {
 import { migrateRiskToUsd } from "@/lib/leef/risk-usd";
 import { migrateSaferRiskDefaults } from "@/lib/leef/risk-defaults-migration";
 import {
+  shouldUpgradeLegacyWaxDefaults,
+  WAX_MICRO_ACTIVE_RISK,
+} from "@/lib/leef/risk-profiles";
+import {
   DEFAULT_GROWTH_TARGETS,
   normalizeTargets,
   type GrowthMode,
@@ -479,6 +483,13 @@ export const useBot = create<BotState>()(
         }>;
         const usd = migrateRiskToUsd(p.risk);
         const safer = version < 13 ? migrateSaferRiskDefaults(p.goals, p.risk) : null;
+        const waxMicroUpgrade =
+          version < 16 &&
+          (p.base ?? "LEEF").toUpperCase() === "LEEF" &&
+          (p.quote ?? "WAX").toUpperCase() === "WAX" &&
+          shouldUpgradeLegacyWaxDefaults(p.risk)
+            ? WAX_MICRO_ACTIVE_RISK
+            : null;
         const { clipWax: _c, maxPositionWax: _m, ...restRisk } = (p.risk ?? {}) as Record<string, unknown>;
         void _c;
         void _m;
@@ -499,6 +510,7 @@ export const useBot = create<BotState>()(
             ...DEFAULT_RISK,
             ...(restRisk as Partial<BotRisk>),
             ...(safer?.risk ?? {}),
+            ...(waxMicroUpgrade ?? {}),
             minTradeUsd: usd.minTradeUsd,
             maxPositionUsd: usd.maxPositionUsd,
             operationalReserveUsd: usd.operationalReserveUsd,
@@ -534,7 +546,13 @@ export const useBot = create<BotState>()(
               : freshStats(0),
           series: Array.isArray(p.series) ? p.series : [],
           decisions: Array.isArray(p.decisions) ? p.decisions : [],
-          riskMigrationNotice: [usd.notice, safer?.notice].filter(Boolean).join(" ") || null,
+          riskMigrationNotice: [
+            usd.notice,
+            safer?.notice,
+            waxMicroUpgrade
+              ? "WAX Micro Active profile applied to untouched defaults: 10s book polling/cooldown, 60 trades/hour, and a 1.5% per-echo loss ceiling with the existing $5 session budget."
+              : null,
+          ].filter(Boolean).join(" ") || null,
           // Forward-safe: future version bumps must not silently re-enable the
           // venue for a user who switched it off (default ON only when unset).
           neftyVenue: (p as { neftyVenue?: unknown }).neftyVenue !== false,

@@ -65,14 +65,8 @@ function summary(): AiSnapshotSummary {
   };
 }
 
-function answers(over: Partial<JevAnswers> = {}): JevAnswers {
-  return {
-    [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.9 },
-    [AI_QID.sizeBucket]: { type: "choice", choice: "half", confidence: 0.8 },
-    [AI_QID.riskStress]: { type: "noul", noul: 0.1 },
-    [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
-    ...over,
-  };
+function answers(noul = 0.9): JevAnswers {
+  return { [AI_QID.tradeDecision]: { type: "noul", noul } };
 }
 
 const context: AiProposalContext = {
@@ -122,34 +116,37 @@ const swapContext: AiProposalContext = {
 };
 
 describe("buildAiQuestions", () => {
-  it("offers only the action types allowed for the exact deterministic candidate", () => {
+  it("asks one candidate-bound yes/no question, not four independent gates", () => {
     const q = buildAiQuestions(summary());
-    const actionQuestion = q[AI_QID.action] as { instructions: string; criteria: Record<string, unknown> };
-    expect(actionQuestion.instructions).toContain("USD notional");
-    expect(actionQuestion.instructions).toContain("pool liquidity");
-    const criteria = actionQuestion.criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "buy"]);
-    expect(q[AI_QID.sizeBucket]?.type).toBe("choice");
-    expect(q[AI_QID.riskStress]?.type).toBe("noul");
-    expect(q[AI_QID.riskExecute]?.type).toBe("noul");
+    expect(Object.keys(q)).toEqual([AI_QID.tradeDecision]);
+    expect(q[AI_QID.tradeDecision]?.type).toBe("noul");
+    expect(q[AI_QID.tradeDecision]?.instructions).toContain("state.candidate");
+    expect(q[AI_QID.tradeDecision]?.instructions).toMatch(/YES/);
+    expect(q[AI_QID.tradeDecision]?.instructions).toMatch(/NO/);
   });
 
-  it("offers swap as accept/reject only and never asks Jev to choose a token pair", () => {
-    const s: AiSnapshotSummary = {
+  it("uses the same single yes/no question for buy, swap and atomic arb candidates", () => {
+    const swap = buildAiQuestions({
       ...summary(),
       candidateKind: "swap",
       candidateKey: swapContext.candidateKey,
       candidate: swapContext.candidate,
       allowedActions: ["hold", "swap"],
-    };
-    const q = buildAiQuestions(s);
-    const criteria = (q[AI_QID.action] as { criteria: Record<string, unknown> }).criteria;
-    expect(Object.keys(criteria)).toEqual(["hold", "swap"]);
-    expect(q["swap_token_in"]).toBeUndefined();
-    expect(q["swap_token_out"]).toBeUndefined();
+    });
+    expect(Object.keys(swap)).toEqual([AI_QID.tradeDecision]);
+
+    const arb = buildAiQuestions({
+      ...summary(),
+      candidateKind: "arb",
+      candidateKey: "volume:atomic:217>218",
+      candidate: { ...summary().candidate, kind: "arb", arbKind: "volume" },
+      allowedActions: ["hold", "arb"],
+    });
+    expect(Object.keys(arb)).toEqual([AI_QID.tradeDecision]);
+    expect(arb[AI_QID.tradeDecision]?.instructions).toContain("atomic");
   });
 
-  it("includes engine-owned market regime, danger, portfolio and contract context", () => {
+  it("keeps engine-owned market regime, danger, portfolio and contract context", () => {
     const s = summary();
     expect(s.market.regime).toBe("range");
     expect(s.market.dangerScore).toBe(10);
@@ -205,168 +202,57 @@ describe("buildAiCandidateKey", () => {
 });
 
 describe("parseAiProposal", () => {
-  it("parses a buy judgement for the matching engine candidate", () => {
-    const p = parseAiProposal(answers(), context);
-    expect(p).not.toBeNull();
-    expect(p!.action).toBe("buy");
-    expect(p!.params.sizePct).toBe("50");
-    expect(p!.confidence).toBeCloseTo(0.9, 10);
-    expect(p!.confidence).toBeGreaterThanOrEqual(AI_EXEC_CONFIDENCE_MIN - 0.2);
-    expect(p!.rationale).toContain("action=buy");
-    expect(p!.snapshotFetchedAt).toBe(context.snapshotFetchedAt);
-    expect(p!.model).toBe("jev-latest");
-    expect(p!.candidateKey).toBe(context.candidateKey);
-    expect(p!.candidate?.expectedNetEdgePct).toBe(1.2);
+  it("approves the exact engine buy candidate when Jev returns a strong yes", () => {
+    const proposal = parseAiProposal(answers(0.91), context);
+    expect(proposal?.action).toBe("buy");
+    expect(proposal?.confidence).toBeCloseTo(0.91, 10);
+    expect(proposal?.params).toEqual({});
+    expect(proposal?.rationale).toContain("trade=yes");
+    expect(proposal?.candidateKey).toBe(context.candidateKey);
+    expect(proposal?.model).toBe("jev-latest");
   });
 
-  it("allows Jev to reject a candidate with hold", () => {
-    const a = answers();
-    delete a[AI_QID.sizeBucket];
-    const p = parseAiProposal({
-      ...a,
-      [AI_QID.action]: { type: "choice", choice: "hold", confidence: 0.9 },
-    }, context);
-    expect(p).not.toBeNull();
-    expect(p!.action).toBe("hold");
-    expect(p!.params.sizePct).toBeUndefined();
+  it("rejects a candidate when Jev says no", () => {
+    const proposal = parseAiProposal(answers(0.05), context);
+    expect(proposal?.action).toBe("hold");
+    expect(proposal?.rationale).toContain("trade=no");
   });
 
-  it("rejects unsupported actions and actions that do not match the candidate", () => {
-    expect(parseAiProposal({})).toBeNull();
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "sell", confidence: 0.99 },
+  it("fails closed below the 0.75 affirmative probability floor", () => {
+    expect(parseAiProposal(answers(0.74), context)?.action).toBe("hold");
+  });
+
+  it("maps yes to the one allowed code-owned action for a swap candidate", () => {
+    const proposal = parseAiProposal(answers(0.92), swapContext);
+    expect(proposal?.action).toBe("swap");
+    expect(proposal?.params).toEqual({ tokenIn: "WAX", tokenOut: "LEEF" });
+    expect(proposal?.candidateKey).toBe(swapContext.candidateKey);
+  });
+
+  it("maps a preview yes to buy without asking the model to name the action", () => {
+    const proposal = parseAiProposal(answers(0.9), context);
+    expect(proposal?.action).toBe("buy");
+  });
+
+  it("rejects missing, malformed and out-of-range Noul answers", () => {
+    expect(parseAiProposal({}, context)).toBeNull();
+    expect(parseAiProposal({ [AI_QID.tradeDecision]: { type: "choice", choice: "buy" } }, context)).toBeNull();
+    expect(parseAiProposal(answers(1.01), context)).toBeNull();
+    expect(parseAiProposal(answers(-0.01), context)).toBeNull();
+  });
+
+  it("rejects an affirmative judgement without exactly one executable candidate action", () => {
+    expect(parseAiProposal(answers(0.95), {
+      ...context,
+      allowedActions: ["hold", "buy", "swap"],
     })).toBeNull();
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-    }, context)).toBeNull();
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.9 },
-    }, swapContext)).toBeNull();
-  });
-
-  it("normalizes harmless casing and whitespace in TypeSafe choice labels", () => {
-    const p = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "CHOICE", choice: " BUY ", confidence: 0.91 },
-      [AI_QID.sizeBucket]: { type: "choice", choice: " HALF ", confidence: 0.86 },
-      [AI_QID.riskStress]: { type: "NOUL", noul: 0.1 },
-      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
-    }, context);
-    expect(p?.action).toBe("buy");
-    expect(p?.params.sizePct).toBe("50");
-  });
-
-  it("derives missing Choice confidence from the full TypeSafe probability distribution", () => {
-    const p = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "buy", probabilities: { buy: 0.91, hold: 0.09 } },
-      [AI_QID.sizeBucket]: { type: "choice", choice: "half", probabilities: { half: 0.88, quarter: 0.12 } },
-    }, context);
-    expect(p?.action).toBe("buy");
-    expect(p?.confidence).toBeCloseTo(0.82, 10);
-  });
-
-  it("reads Noul yes probability when the gateway returns the equivalent probability map", () => {
-    const p = parseAiProposal({
-      ...answers(),
-      [AI_QID.riskStress]: { type: "noul", probabilities: { true: 0.1, false: 0.9 } },
-      [AI_QID.riskExecute]: { type: "noul", probabilities: { true: 0.9, false: 0.1 } },
-    }, context);
-    expect(p?.action).toBe("buy");
-  });
-
-  it("rejects out-of-range confidence and Noul values instead of clamping them", () => {
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 1.2 },
-    }, context)).toBeNull();
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.riskExecute]: { type: "noul", noul: 1.1 },
-    }, context)).toBeNull();
-  });
-
-  it("uses action Choice confidence while gating Noul answers as direct probabilities", () => {
-    const p = parseAiProposal(answers({
-      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.98 },
-      [AI_QID.sizeBucket]: { type: "choice", choice: "half", confidence: 0.98 },
-      [AI_QID.riskStress]: { type: "noul", noul: 0.2 },
-      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
-    }), context);
-    expect(p).not.toBeNull();
-    expect(p!.confidence).toBeCloseTo(0.98, 10);
-    expect(p!.weakest).toBe(AI_QID.action);
-  });
-
-  it("does not let an uncertain but bounded size preference veto an otherwise safe action", () => {
-    const p = parseAiProposal(answers({
-      [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.91 },
-      [AI_QID.sizeBucket]: { type: "choice", choice: "quarter", confidence: 0.2 },
-      [AI_QID.riskStress]: { type: "noul", noul: 0.1 },
-      [AI_QID.riskExecute]: { type: "noul", noul: 0.9 },
-    }), context);
-    expect(p?.action).toBe("buy");
-    expect(p?.params.sizePct).toBe("25");
-    expect(p?.confidence).toBe(0.91);
-  });
-
-  it("derives TypeSafe Choice confidence from a valid distribution, not the selected probability", () => {
-    const p = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: {
-        type: "choice",
-        choice: "buy",
-        probabilities: { hold: 0.1, buy: 0.9 },
-      },
-    }, context);
-    expect(p?.confidence).toBeCloseTo(0.8, 10);
-  });
-
-  it("rejects candidates under acute market stress or with unsafe data", () => {
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.riskStress]: { type: "noul", noul: 0.9 },
-    }, context)).toBeNull();
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.riskExecute]: { type: "noul", noul: 0.2 },
-    }, context)).toBeNull();
-  });
-
-  it("accepts only the exact swap pair supplied by the engine", () => {
-    const p = parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-    }, swapContext);
-    expect(p).not.toBeNull();
-    expect(p!.params.tokenIn).toBe("WAX");
-    expect(p!.params.tokenOut).toBe("LEEF");
-    expect(p!.candidate?.tokenIn).toBe("WAX");
-    expect(p!.candidate?.tokenOut).toBe("LEEF");
-  });
-
-  it("rejects an incomplete swap candidate instead of accepting model-invented tokens", () => {
-    const incomplete = {
+    expect(parseAiProposal(answers(0.95), {
       ...swapContext,
-      candidate: { kind: "swap" as const, key: "bad-candidate" },
-    };
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.action]: { type: "choice", choice: "swap", confidence: 0.9 },
-    }, incomplete)).toBeNull();
+      candidate: { kind: "swap", key: "bad-candidate" },
+    })).toBeNull();
   });
 
-  it("unknown size bucket is unusable", () => {
-    expect(parseAiProposal({
-      ...answers(),
-      [AI_QID.sizeBucket]: { type: "choice", choice: "yuge", confidence: 0.99 },
-    }, context)).toBeNull();
-  });
-
-  it("exposes the documented execution gate constant", () => {
+  it("exposes the documented affirmative confidence floor", () => {
     expect(AI_EXEC_CONFIDENCE_MIN).toBe(0.75);
   });
 });
@@ -378,8 +264,12 @@ describe("isAiProposalFresh", () => {
   });
 
   it("rejects missing source metadata, future snapshots and stale market evidence", () => {
-    const p = parseAiProposal(answers())!;
-    expect(isAiProposalFresh(p, "1970-01-01T00:01:45.000Z", 106_000)).toBe(false);
+    const p = parseAiProposal(answers(0.9), context)!;
+    expect(isAiProposalFresh(
+      { ...p, snapshotFetchedAt: undefined },
+      "1970-01-01T00:01:45.000Z",
+      106_000,
+    )).toBe(false);
     const bound = parseAiProposal(answers(), context)!;
     expect(isAiProposalFresh(bound, "1970-01-01T00:04:00.000Z", 240_000)).toBe(false);
     expect(isAiProposalFresh(bound, "1970-01-01T00:01:45.000Z", 99_000)).toBe(false);
@@ -401,14 +291,14 @@ describe("isAiProposalFresh", () => {
 
 
 describe("atomic arb Jev judgement", () => {
-  const summaryWithArb = {
-    ...summary(),
-    candidateKind: "arb" as never,
+  const arbContext: AiProposalContext = {
+    ...context,
+    candidateKind: "arb",
     candidateKey: "volume:atomic:217>218",
     candidate: {
-      kind: "arb" as never,
+      kind: "arb",
       key: "volume:atomic:217>218",
-      arbKind: "volume" as const,
+      arbKind: "volume",
       tokenIn: "WAX",
       tokenInContract: "eosio.token",
       tokenOut: "WAX",
@@ -422,32 +312,20 @@ describe("atomic arb Jev judgement", () => {
       poolIds: [217, 218],
       hops: 2,
     },
-    allowedActions: ["hold", "arb"] as never,
+    allowedActions: ["hold", "arb"],
   };
 
-  it("offers Jev accept/reject for an atomic volume candidate without asking it to resize the route", () => {
-    const questions = buildAiQuestions(summaryWithArb);
-    const action = questions[AI_QID.action] as { instructions: string; criteria: Record<string, unknown> };
-    expect(Object.keys(action.criteria)).toEqual(["hold", "arb"]);
-    expect(action.instructions.toLowerCase()).toContain("atomic");
-    expect(questions[AI_QID.sizeBucket]).toBeUndefined();
-  });
-
-  it("parses an approval bound to the exact atomic volume candidate", () => {
-    const candidateContext = {
-      ...context,
-      candidateKind: "arb" as never,
-      candidateKey: summaryWithArb.candidateKey,
-      candidate: summaryWithArb.candidate,
-      allowedActions: ["hold", "arb"] as never,
-    };
-    const response = answers({
-      [AI_QID.action]: { type: "choice", choice: "arb", confidence: 0.94 },
-    });
-    delete response[AI_QID.sizeBucket];
-    const proposal = parseAiProposal(response, candidateContext);
+  it("approves only the exact engine-generated atomic volume candidate", () => {
+    const proposal = parseAiProposal(answers(0.94), arbContext);
     expect(proposal?.action).toBe("arb");
     expect(proposal?.candidateKey).toBe("volume:atomic:217>218");
-    expect(proposal?.params.sizePct).toBeUndefined();
+    expect(proposal?.params).toEqual({});
+  });
+
+  it("refuses an atomic arb candidate missing exact pool evidence", () => {
+    expect(parseAiProposal(answers(0.94), {
+      ...arbContext,
+      candidate: { ...arbContext.candidate!, poolIds: [] },
+    })).toBeNull();
   });
 });

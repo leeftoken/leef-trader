@@ -588,7 +588,10 @@ export function pickClipInBand(minIn: number, maxIn: number, seed = Date.now()):
 export function hopsForStrategy(strategy: BotStrategy, cap: number, seed = Date.now()): number {
   const c = Math.min(10, Math.max(1, Math.floor(cap || 4)));
   const r = ((seed >>> 0) % 3) + 1;
-  if (strategy === "spread" || strategy === "volume") return Math.min(c, 2);
+  if (strategy === "spread") return Math.min(c, 2);
+  // Volume may use a three-pool path through the LEEF network, but stays
+  // bounded by the user's cap and exact venue/economic gates.
+  if (strategy === "volume") return Math.min(c, 3);
   if (strategy === "unleashed")
     return Math.min(c, Math.max(2, r + 1));
   if (strategy === "growth") return hopsForGrowth("balanced", c);
@@ -924,6 +927,47 @@ function scoreBuyOpportunity(opts: {
     }),
     calibrationHaircut: calibrationHaircut(opts.calibration),
     strategyConfidence: opts.strategyConfidence,
+  });
+}
+
+function scoreTapeVolumeOpportunity(opts: {
+  tape: NonNullable<ReturnType<typeof planLeefTape>>;
+  quoteAgeMs: number;
+  maxQuoteAgeMs: number;
+  snap: LeefSnapshot;
+  balances: Record<string, number>;
+  calibration?: CalibrationMemory;
+}): ScoredOpportunity {
+  const tape = opts.tape;
+  return buildScoredOpportunity({
+    fingerprint: opportunityFingerprint({
+      kind: "volume-tape",
+      tokenIn: tape.tokenIn,
+      tokenOut: tape.tokenOut,
+      routeId: tape.route.id,
+    }),
+    intent: "volume",
+    source: "volume-tape",
+    tokenIn: tape.tokenIn,
+    tokenOut: tape.tokenOut,
+    amountIn: tape.amountIn,
+    notionalUsd: tape.usdIn,
+    expectedNetProfitUsd: tape.netUsd,
+    expectedNetEdgePct: tape.netPct,
+    hops: routeComplexity(tape.route).hops,
+    liquidityUsd: tape.route.tvlUsd,
+    impactPct: tape.route.priceImpact * 100,
+    split: tape.route.kind === "split",
+    actions: routeComplexity(tape.route).actions,
+    quoteAgeMs: opts.quoteAgeMs,
+    maxQuoteAgeMs: opts.maxQuoteAgeMs,
+    inventoryFactor: inventoryFactor({
+      snap: opts.snap,
+      balances: opts.balances,
+      tokenOut: tape.tokenOut,
+    }),
+    calibrationHaircut: calibrationHaircut(opts.calibration),
+    strategyConfidence: 1,
   });
 }
 
@@ -1876,34 +1920,82 @@ export function evaluateBot(input: BotInput): Decision {
           if (echoPoolGate) {
             considered.push(`volume ${echoPoolGate}`);
           } else {
-          const opp = scoreArbOpportunity({
-            source: "volume",
-            intent: "volume",
-            plan: echo,
-            quoteUsd,
-            quoteAgeMs,
-            maxQuoteAgeMs,
-            snap,
-            balances: input.balances,
-            calibration: calOf("volume"),
-            regimeFactor: regW("volume"),
-          });
-          const why = rejectOpportunity(opp, oppGate);
-          if (why) {
-            considered.push(`volume ${why}`);
-          } else {
-            const costUsd = Math.max(0, echo.quoteIn - echo.quoteOut) * quoteUsd;
-            return {
-              kind: "arb",
-              arbKind: "volume",
+            const opp = scoreArbOpportunity({
+              source: "volume",
+              intent: "volume",
               plan: echo,
-              opportunity: opp,
-              reason: `Auto: no profitable action — volume echo #${echo.buyPool.id}${
-                echo.sellPool.id === echo.buyPool.id ? " round-trip" : `→#${echo.sellPool.id}`
-              } · cost $${costUsd.toFixed(3)} · exec ${(opp.executionProbability * 100).toFixed(0)}%`,
-            };
+              quoteUsd,
+              quoteAgeMs,
+              maxQuoteAgeMs,
+              snap,
+              balances: input.balances,
+              calibration: calOf("volume"),
+              regimeFactor: regW("volume"),
+            });
+            const why = rejectOpportunity(opp, oppGate);
+            if (why) {
+              considered.push(`volume ${why}`);
+            } else {
+              const costUsd = Math.max(0, echo.quoteIn - echo.quoteOut) * quoteUsd;
+              return {
+                kind: "arb",
+                arbKind: "volume",
+                plan: echo,
+                opportunity: opp,
+                reason: `Auto: no profitable action — volume echo #${echo.buyPool.id}${
+                  echo.sellPool.id === echo.buyPool.id ? " round-trip" : `→#${echo.sellPool.id}`
+                } · cost ${costUsd.toFixed(3)} · exec ${(opp.executionProbability * 100).toFixed(0)}%`,
+              };
+            }
           }
+        }
+      }
+
+      // If no profitable candidate or atomic echo exists, let Auto use the
+      // same bounded multi-pool LEEF tape planner as Volume Maker. It tests a
+      // deterministic size ladder, ranks by net outcome, and remains under
+      // the session echo budget + exact venue min-out loss ceiling.
+      if (!dangerHold && !echoGate && risk.maxEchoLossPct > 0 && usdBounds.effectiveMaxUsd > 0) {
+        const tape = planLeefTape(snap, input.balances, {
+          minUsd: risk.minTradeUsd,
+          maxUsd: usdBounds.effectiveMaxUsd,
+          maxHops: hopsForStrategy("volume", risk.maxHops, now),
+          seed: now,
+          maxLossPct: risk.maxEchoLossPct,
+          base,
+          quote,
+        });
+        if (tape) {
+          const tapeGate = volumeGateReason(input, risk, tape.route.poolIds);
+          if (tapeGate) {
+            considered.push(`volume tape ${tapeGate}`);
+          } else {
+            const opp = scoreTapeVolumeOpportunity({
+              tape,
+              quoteAgeMs,
+              maxQuoteAgeMs,
+              snap,
+              balances: input.balances,
+              calibration: calOf("volume"),
+            });
+            const why = rejectOpportunity(opp, oppGate);
+            if (why) {
+              considered.push(`volume tape ${why} · net ${tape.netPct.toFixed(2)}%`);
+            } else {
+              return {
+                kind: "swap",
+                tokenIn: tape.tokenIn,
+                tokenOut: tape.tokenOut,
+                amountIn: tape.amountIn,
+                route: tape.route,
+                opportunity: opp,
+                minNetPct: -risk.maxEchoLossPct,
+                reason: `Auto: no profitable candidate — bounded LEEF volume tape ${tape.tokenIn}→${tape.tokenOut} · net ${tape.netPct.toFixed(2)}% · EV ${opp.expectedValueUsd.toFixed(4)}`,
+              };
+            }
           }
+        } else {
+          considered.push("volume tape: no executable route within size/loss budget");
         }
       }
       return hold(`Auto scan${regTag}: ${considered.join(" · ") || "nothing in range"} — waiting`);

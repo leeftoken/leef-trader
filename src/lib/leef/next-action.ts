@@ -13,7 +13,6 @@
 import type { LeefSnapshot, SwapRoute } from "./types";
 import { usdPriceOf } from "./cost-model";
 import {
-  bestExecutionRouteOnGraph,
   buildRouteGraph,
   MAX_ROUTE_HOPS,
   rankExecutionRoutesOnGraph,
@@ -32,6 +31,19 @@ export type NextActionPlan = {
   /** path = change inventory; cycle = round-trip same asset. */
   kind: "path" | "cycle";
 };
+
+/** Best path for a strategy-bounded graph depth; returns null when no path fits. */
+export function bestRouteWithinHops(
+  graph: ReturnType<typeof buildRouteGraph>,
+  amountIn: number,
+  tokenIn: string,
+  tokenOut: string,
+  maxHops: number,
+): SwapRoute | null {
+  const requested = Number.isFinite(maxHops) ? Math.floor(maxHops) : 1;
+  const depth = Math.min(MAX_ROUTE_HOPS, Math.max(1, requested));
+  return rankExecutionRoutesOnGraph(graph, amountIn, tokenIn, tokenOut, depth)[0] ?? null;
+}
 
 /**
  * Assets the planner may search for a profitable round trip (A→…→A). LEEF
@@ -78,7 +90,7 @@ export function planNextAction(
 
     for (const dest of dests) {
       if (dest === token.symbol) continue;
-      const route = bestExecutionRouteOnGraph(graph, spend, token.symbol, dest);
+      const route = bestRouteWithinHops(graph, spend, token.symbol, dest, maxHops);
       if (!route) continue;
       const pxOut = usdPriceOf(dest, snap);
       if (!(pxOut > 0)) continue;
@@ -94,7 +106,7 @@ export function planNextAction(
       // reverse route; beyond (two-way costs + 3%), the mark is lying and
       // the candidate is rejected. Mark-based inventory improvement remains
       // possible — phantom profit does not.
-      const back = bestExecutionRouteOnGraph(graph, route.amountOut, dest, token.symbol);
+      const back = bestRouteWithinHops(graph, route.amountOut, dest, token.symbol, maxHops);
       if (back && back.amountOut > 0 && route.amountOut > 0) {
         const impliedExitUsd = (back.amountOut * pxIn) / route.amountOut;
         const tolerance =
@@ -157,6 +169,21 @@ export type TapeClip = {
   netUsd: number;
   netPct: number;
 };
+ 
+/**
+ * Profit-first selection for a volume clip.
+ * Prefer the highest net dollar outcome; if every viable route loses, choose
+ * the least-negative result rather than maximising the size of the loss.
+ * Notional is only a tie-break, so volume never outranks economics.
+ */
+export function selectBestTapeClip(clips: TapeClip[]): TapeClip | null {
+  if (clips.length === 0) return null;
+  return [...clips].sort((a, b) => {
+    const netDelta = b.netUsd - a.netUsd;
+    if (Math.abs(netDelta) > 1e-12) return netDelta;
+    return b.usdIn - a.usdIn;
+  })[0] ?? null;
+}
 
 /**
  * Volume tape: any held token → base (or base → quote) at a mixed size
@@ -182,8 +209,9 @@ export function planLeefTape(
   },
 ): TapeClip | null {
   const graph = buildRouteGraph(snap.pools, snap.aux);
+  const requestedHops = Number.isFinite(opts.maxHops) ? Math.floor(opts.maxHops ?? 4) : 4;
+  const maxHops = Math.min(MAX_ROUTE_HOPS, Math.max(1, requestedHops));
   const maxLoss = Math.max(0, opts.maxLossPct ?? 1.5);
-  const seed = opts.seed ?? Date.now();
   const base = (opts.base ?? "LEEF").toUpperCase();
   const quote = (opts.quote ?? "WAX").toUpperCase();
   const minUsd = Math.max(0, opts.minUsd);
@@ -198,7 +226,10 @@ export function planLeefTape(
     .slice(0, 8);
 
   const clips: TapeClip[] = [];
-  let i = 0;
+  // Evaluate a deterministic size ladder for every holding. The old planner
+  // sampled one pseudo-random size per token, which could repeatedly miss a
+  // profitable micro-clip or choose a needlessly large loss-making clip.
+  const sizeFractions = [0, 0.05, 0.12, 0.28, 0.5, 0.75, 1];
   for (const { token, amount, usd } of entries) {
     const px = usdPriceOf(token.symbol, snap);
     if (!(px > 0)) continue;
@@ -207,16 +238,13 @@ export function planLeefTape(
     if (capUsd + 1e-12 < minUsd) continue;
     const loUsd = minUsd;
     const hiUsd = capUsd;
-    const r = ((seed + i * 97_331) >>> 0) / 4_294_967_296;
-    const ladder = [0, 0.05, 0.12, 0.28, 0.5, 0.75, 1];
-    const f = ladder[Math.floor(r * ladder.length) % ladder.length]!;
-    const spendUsd = loUsd + (hiUsd - loUsd) * f;
-    const spend = Math.min(amount, spendUsd / px);
-    if (!(spend > 0)) continue;
-    i += 1;
+    const testedAmounts = new Set<string>();
 
     const tryPair = (from: string, to: string, amt: number) => {
-      const route = bestExecutionRouteOnGraph(graph, amt, from, to);
+      const amountKey = `${from}>${to}:${Math.round(amt * 1e8)}`;
+      if (!(amt > 0) || testedAmounts.has(amountKey)) return;
+      testedAmounts.add(amountKey);
+      const route = bestRouteWithinHops(graph, amt, from, to, maxHops);
       if (!route) return;
       const pxOut = usdPriceOf(to, snap);
       const pxIn = usdPriceOf(from, snap) || 0;
@@ -230,7 +258,7 @@ export function planLeefTape(
       // overprices the destination vs what the route graph would actually
       // pay to sell it back, the "profit" exists only in the marks. Bound
       // loss stays enforced; phantom gain does not.
-      const back = bestExecutionRouteOnGraph(graph, route.amountOut, to, from);
+      const back = bestRouteWithinHops(graph, route.amountOut, to, from, maxHops);
       if (back && back.amountOut > 0 && route.amountOut > 0) {
         const impliedExitUsd = (back.amountOut * pxIn) / route.amountOut;
         const tolerance =
@@ -249,21 +277,19 @@ export function planLeefTape(
       });
     };
 
-    if (token.symbol.toUpperCase() !== base) tryPair(token.symbol, base, spend);
-    if (token.symbol.toUpperCase() === base) {
-      for (const q of [...new Set([quote, "WAX", "WAXUSDC", "USDT", "USDC", "PARAUSD"])]) {
-        if (q === base) continue;
-        tryPair(base, q, spend);
+    for (const fraction of sizeFractions) {
+      const spendUsd = loUsd + (hiUsd - loUsd) * fraction;
+      const spend = Math.min(amount, spendUsd / px);
+      if (!(spend > 0)) continue;
+      if (token.symbol.toUpperCase() !== base) {
+        tryPair(token.symbol, base, spend);
+      } else {
+        for (const q of [...new Set([quote, "WAX", "WAXUSDC", "USDT", "USDC", "PARAUSD"])]) {
+          if (q !== base) tryPair(base, q, spend);
+        }
       }
     }
   }
 
-  if (clips.length === 0) return null;
-  clips.sort((a, b) => {
-    const ap = a.netUsd >= 0 ? 1 : 0;
-    const bp = b.netUsd >= 0 ? 1 : 0;
-    if (ap !== bp) return bp - ap;
-    return b.usdIn - a.usdIn;
-  });
-  return clips[0] ?? null;
+  return selectBestTapeClip(clips);
 }

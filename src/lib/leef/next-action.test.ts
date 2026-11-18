@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planLeefTape, planNextAction } from "./next-action";
+import { bestRouteWithinHops, planLeefTape, planNextAction, selectBestTapeClip } from "./next-action";
+import { buildRouteGraph } from "./route-optimizer";
 import type { AuxPool, LeefPool, LeefSnapshot } from "./types";
 
 const WAX_USD = 0.02;
@@ -126,6 +127,41 @@ describe("planNextAction", () => {
   });
 });
 
+describe("selectBestTapeClip", () => {
+  const clip = (usdIn: number, netUsd: number) => ({
+    tokenIn: "WAX",
+    tokenOut: "LEEF",
+    amountIn: usdIn,
+    route: {} as never,
+    usdIn,
+    usdOut: usdIn + netUsd,
+    netUsd,
+    netPct: usdIn > 0 ? (netUsd / usdIn) * 100 : 0,
+  });
+
+  it("chooses the highest net dollar outcome, not the largest notional", () => {
+    const lowSizeProfit = clip(0.1, 0.001);
+    const highSizeLoss = clip(1, -0.004);
+    expect(selectBestTapeClip([highSizeLoss, lowSizeProfit])).toBe(lowSizeProfit);
+  });
+
+  it("when all clips are negative, chooses the smallest absolute loss", () => {
+    const largerLoss = clip(1, -0.004);
+    const smallerLoss = clip(0.25, -0.0002);
+    expect(selectBestTapeClip([largerLoss, smallerLoss])).toBe(smallerLoss);
+  });
+
+  it("uses greater notional only as a tie-break after equal net profit", () => {
+    const smaller = clip(0.25, 0.001);
+    const larger = clip(0.5, 0.001);
+    expect(selectBestTapeClip([smaller, larger])).toBe(larger);
+  });
+
+  it("returns null when no route candidates exist", () => {
+    expect(selectBestTapeClip([])).toBeNull();
+  });
+});
+
 describe("planLeefTape", () => {
   it("returns null on an empty wallet", () => {
     expect(planLeefTape(snap([mkPool(50_000, 500_000_000)]), {}, { minUsd: 0, maxUsd: 1 })).toBeNull();
@@ -139,6 +175,18 @@ describe("planLeefTape", () => {
       expect(clip.usdIn).toBeLessThanOrEqual(0.5 + 1e-6);
     }
   });
+  it("selects the same best clip regardless of seed after evaluating the full size ladder", () => {
+    const s = snap([mkPool(50_000, 500_000_000)]);
+    const first = planLeefTape(s, { WAX: 500 }, {
+      minUsd: 0.1, maxUsd: 2, maxLossPct: 50, seed: 1,
+    });
+    const second = planLeefTape(s, { WAX: 500 }, {
+      minUsd: 0.1, maxUsd: 2, maxLossPct: 50, seed: 987654,
+    });
+    expect(first?.amountIn).toBe(second?.amountIn);
+    expect(first?.netUsd).toBeCloseTo(second?.netUsd ?? 0, 10);
+  });
+
   it("enforces minUsd: a sub-min holding tapes nothing (never clamped up)", () => {
     const s = snap([mkPool(50_000, 500_000_000)]);
     // 1 WAX ≈ $0.02 < the $0.50 min — previously this traded BELOW the floor.
@@ -161,5 +209,34 @@ describe("planLeefTape", () => {
     expect(
       planLeefTape(s, { WAX: 500 }, { minUsd: 0.5, maxUsd: 0, maxLossPct: 50, seed: 1 }),
     ).toBeNull();
+  });
+});
+
+describe("bestRouteWithinHops", () => {
+  const token = (symbol: string, contract: string, quantity: number) => ({
+    symbol, contract, decimals: 8, quantity,
+  });
+  const pool = (id: number, a: ReturnType<typeof token>, b: ReturnType<typeof token>) => ({
+    id, fee: 3000, feePct: 0.3, tokenA: a, tokenB: b, tvlUsd: 10_000, volume24Usd: 1_000,
+  });
+
+  it("does not return a three-pool route when the active strategy allows only two hops", () => {
+    const graph = buildRouteGraph([], [
+      pool(501, token("WAX", "eosio.token", 100_000), token("AAA", "aaa.token", 100_000)),
+      pool(502, token("AAA", "aaa.token", 100_000), token("BBB", "bbb.token", 100_000)),
+      pool(503, token("BBB", "bbb.token", 100_000), token("LEEF", "leefmaincorp", 100_000)),
+    ]);
+    expect(bestRouteWithinHops(graph, 1, "WAX", "LEEF", 2)).toBeNull();
+  });
+
+  it("finds the same multi-pool route when three hops are allowed", () => {
+    const graph = buildRouteGraph([], [
+      pool(501, token("WAX", "eosio.token", 100_000), token("AAA", "aaa.token", 100_000)),
+      pool(502, token("AAA", "aaa.token", 100_000), token("BBB", "bbb.token", 100_000)),
+      pool(503, token("BBB", "bbb.token", 100_000), token("LEEF", "leefmaincorp", 100_000)),
+    ]);
+    const route = bestRouteWithinHops(graph, 1, "WAX", "LEEF", 3);
+    expect(route?.legs).toHaveLength(3);
+    expect(route?.poolIds).toEqual([501, 502, 503]);
   });
 });

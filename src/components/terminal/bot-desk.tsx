@@ -28,6 +28,7 @@ import {
   STRATEGIES,
   type BotStrategy,
 } from "@/lib/leef/bot-engine";
+import { WAX_MICRO_ACTIVE_RISK } from "@/lib/leef/risk-profiles";
 import { positionMarkUsd } from "@/lib/leef/risk-usd";
 import { usdPriceOf } from "@/lib/leef/cost-model";
 import { fmtNum, fmtUsd } from "@/lib/leef/format";
@@ -408,7 +409,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           <div>
             <h3 className="text-sm font-medium">Quick setup</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Apply a sensible risk profile. You can still fine-tune every setting below.
+              Choose a risk profile. WAX Micro Active increases trading cadence while keeping loss and pool-share caps.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -448,6 +449,10 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               b.setRisk(DEFAULT_RISK);
               b.setGoals(DEFAULT_GOALS);
             }}>Standard</Button>
+            <Button type="button" size="sm" variant="outline" disabled={b.running} onClick={() => {
+              b.setRisk({ ...WAX_MICRO_ACTIVE_RISK });
+              b.setGoals(DEFAULT_GOALS);
+            }}>WAX Micro Active</Button>
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">

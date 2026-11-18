@@ -79,6 +79,7 @@ import {
   markFailed,
   markUnknown,
   pendingTxid,
+  tradeAccount,
   recordCycleTimings,
   unknownBlockReason,
 } from "@/lib/wallet/trade-cycle";
@@ -741,6 +742,13 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
   const txid = pendingTxid();
   if (!txid || !account || !useWallet.getState().canSign()) return;
+  const lockedAccount = tradeAccount();
+  if (lockedAccount && lockedAccount !== account) {
+    useBot.getState().setLastReason(
+      `Recovery belongs to ${lockedAccount}; reconnect that account before inspecting transaction settlement`,
+    );
+    return;
+  }
   const bot = useBot.getState();
   pollUnknown(txid, {
     snapshot: snap,

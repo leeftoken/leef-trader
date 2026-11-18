@@ -6,11 +6,12 @@ const store = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }))
 vi.mock("@/lib/leef/journal", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/leef/journal")>();
   return {
-  executionForRecovery: actual.executionForRecovery,
-  journal: (entry: object) => {
+    ...actual,
+    executionForRecovery: actual.executionForRecovery,
+    journal: (entry: object) => {
     store.rows.push({ ...(entry as Record<string, unknown>), ts: 123 });
   },
-  journalAll: async () => store.rows.map((row) => ({ ...row })),
+    journalAll: async () => store.rows.map((row) => ({ ...row })),
   };
 });
 

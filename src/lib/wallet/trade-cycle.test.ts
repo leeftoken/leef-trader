@@ -21,8 +21,8 @@ import {
 } from "./trade-cycle";
 
 afterEach(() => {
-  markFailed();
   if (typeof localStorage !== "undefined") localStorage.removeItem(TRADE_CYCLE_STORAGE_KEY);
+  restoreTradeCycleLock();
 });
 
 describe("live capital lock", () => {
@@ -203,6 +203,31 @@ describe("live capital lock", () => {
     expect(liveCapitalBlocked()).toBe(true);
   });
 
+
+  it("does not let a late result for another txid release the active capital lock", () => {
+    expect(beginSigning("leefuser")).toBe(true);
+    markBroadcast("1".repeat(64));
+
+    markConfirmed("2".repeat(64));
+    expect(tradePhase()).toBe("broadcasted");
+    expect(pendingTxid()).toBe("1".repeat(64));
+    expect(liveCapitalBlocked()).toBe(true);
+
+    markFailed("2".repeat(64));
+    expect(tradePhase()).toBe("broadcasted");
+    expect(liveCapitalBlocked()).toBe(true);
+  });
+
+  it("releases only the matching transaction after a verified failed outcome", () => {
+    expect(beginSigning("leefuser")).toBe(true);
+    markBroadcast("3".repeat(64));
+
+    markFailed("3".repeat(64));
+    expect(tradePhase()).toBe("idle");
+    expect(liveCapitalBlocked()).toBe(false);
+    expect(localStorage.getItem(TRADE_CYCLE_STORAGE_KEY)).toBeNull();
+  });
+
   it("does not allow user acknowledgement to clear corrupt persisted lock data", () => {
     localStorage.setItem(
       TRADE_CYCLE_STORAGE_KEY,
@@ -217,7 +242,7 @@ describe("live capital lock", () => {
   it("clears persisted lock only after an explicit confirmed or failed outcome", () => {
     expect(beginSigning()).toBe(true);
     markBroadcast("b".repeat(64));
-    markConfirmed();
+    markConfirmed("b".repeat(64));
     expect(localStorage.getItem(TRADE_CYCLE_STORAGE_KEY)).toBeNull();
     expect(liveCapitalBlocked()).toBe(false);
   });

@@ -33,6 +33,19 @@ export type NextActionPlan = {
   kind: "path" | "cycle";
 };
 
+/** Best path for a strategy-bounded graph depth; returns null when no path fits. */
+export function bestRouteWithinHops(
+  graph: ReturnType<typeof buildRouteGraph>,
+  amountIn: number,
+  tokenIn: string,
+  tokenOut: string,
+  maxHops: number,
+): SwapRoute | null {
+  const requested = Number.isFinite(maxHops) ? Math.floor(maxHops) : 1;
+  const depth = Math.min(MAX_ROUTE_HOPS, Math.max(1, requested));
+  return rankExecutionRoutesOnGraph(graph, amountIn, tokenIn, tokenOut, depth)[0] ?? null;
+}
+
 /**
  * Assets the planner may search for a profitable round trip (A→…→A). LEEF
  * included: a LEEF→X→Y→LEEF cycle that grows LEEF is exactly the ecosystem's
@@ -78,7 +91,7 @@ export function planNextAction(
 
     for (const dest of dests) {
       if (dest === token.symbol) continue;
-      const route = bestExecutionRouteOnGraph(graph, spend, token.symbol, dest);
+      const route = bestRouteWithinHops(graph, spend, token.symbol, dest, maxHops);
       if (!route) continue;
       const pxOut = usdPriceOf(dest, snap);
       if (!(pxOut > 0)) continue;
@@ -94,7 +107,7 @@ export function planNextAction(
       // reverse route; beyond (two-way costs + 3%), the mark is lying and
       // the candidate is rejected. Mark-based inventory improvement remains
       // possible — phantom profit does not.
-      const back = bestExecutionRouteOnGraph(graph, route.amountOut, dest, token.symbol);
+      const back = bestRouteWithinHops(graph, route.amountOut, dest, token.symbol, maxHops);
       if (back && back.amountOut > 0 && route.amountOut > 0) {
         const impliedExitUsd = (back.amountOut * pxIn) / route.amountOut;
         const tolerance =
@@ -197,6 +210,8 @@ export function planLeefTape(
   },
 ): TapeClip | null {
   const graph = buildRouteGraph(snap.pools, snap.aux);
+  const requestedHops = Number.isFinite(opts.maxHops) ? Math.floor(opts.maxHops ?? 4) : 4;
+  const maxHops = Math.min(MAX_ROUTE_HOPS, Math.max(1, requestedHops));
   const maxLoss = Math.max(0, opts.maxLossPct ?? 1.5);
   const seed = opts.seed ?? Date.now();
   const base = (opts.base ?? "LEEF").toUpperCase();
@@ -231,7 +246,7 @@ export function planLeefTape(
     i += 1;
 
     const tryPair = (from: string, to: string, amt: number) => {
-      const route = bestExecutionRouteOnGraph(graph, amt, from, to);
+      const route = bestRouteWithinHops(graph, amt, from, to, maxHops);
       if (!route) return;
       const pxOut = usdPriceOf(to, snap);
       const pxIn = usdPriceOf(from, snap) || 0;
@@ -245,7 +260,7 @@ export function planLeefTape(
       // overprices the destination vs what the route graph would actually
       // pay to sell it back, the "profit" exists only in the marks. Bound
       // loss stays enforced; phantom gain does not.
-      const back = bestExecutionRouteOnGraph(graph, route.amountOut, to, from);
+      const back = bestRouteWithinHops(graph, route.amountOut, to, from, maxHops);
       if (back && back.amountOut > 0 && route.amountOut > 0) {
         const impliedExitUsd = (back.amountOut * pxIn) / route.amountOut;
         const tolerance =

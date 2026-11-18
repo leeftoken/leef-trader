@@ -113,13 +113,15 @@ describe("assessUnknownExecution", () => {
     expect(result).toMatchObject({ ok: false });
   });
 
-  it("requires both quote-token transfer directions for arbitrage recovery", () => {
+  it("requires both quote-token directions and both base-token legs for arbitrage recovery", () => {
     const arb = execution({ action: "arb", tokenIn: "WAX", tokenOut: "WAX", amountIn: 10 });
     const oneWay = [buyTransfers[0]!];
     expect(assessUnknownExecution(arb, oneWay, context)).toMatchObject({ ok: false });
     const twoWay = [
       ...oneWay,
       { contract: "eosio.token", from: "swap.alcor", to: account, quantity: "10.10000000 WAX", amount: 10.1, symbol: "WAX", memo: "arb output" },
+      { contract: "leefmaincorp", from: "swap.alcor", to: account, quantity: "50.0000 LEEF", amount: 50, symbol: "LEEF", memo: "buy leg" },
+      { contract: "leefmaincorp", from: account, to: "swap.alcor", quantity: "50.0000 LEEF", amount: 50, symbol: "LEEF", memo: "sell leg" },
     ];
     expect(assessUnknownExecution(arb, twoWay, context)).toMatchObject({ ok: true });
   });

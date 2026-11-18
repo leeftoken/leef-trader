@@ -133,7 +133,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
       const result = await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 });
       setRecoveryResult(result);
       if (result.status === "failed") {
-        markFailed();
+        markFailed(unresolvedTxid);
         setRecoveryNotice("The transaction failure was independently confirmed. The live capital lock has been released; no fill was booked.");
         return;
       }
@@ -190,7 +190,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
         return;
       }
-      markConfirmed(); // clear the guard only after state + journal reconciliation
+      markConfirmed(unresolvedTxid); // clear the guard only after state + journal reconciliation
       setRecoveryNotice("Recovered from confirmed on-chain transfers. Bot position state and the evidence journal are reconciled; the live capital lock is released. Historical P&L was not estimated.");
     } catch (error) {
       setRecoveryNotice(error instanceof Error ? error.message : "Recovery inspection failed. The live capital lock remains in place.");

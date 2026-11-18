@@ -6,6 +6,7 @@ import {
   liveCapitalBlocked,
   markBroadcast,
   markConfirmed,
+  markReconciling,
   markUnknown,
   restoreTradeCycleLock,
   unknownBlockReason,
@@ -92,6 +93,7 @@ describe("trade-cycle lock", () => {
     expect(beginSigning()).toBe(false);
     markBroadcast("aa".repeat(32));
     expect(liveCapitalBlocked()).toBe(true);
+    markReconciling("aa".repeat(32));
     markUnknown("aa".repeat(32));
     expect(liveCapitalBlocked()).toBe(true);
     expect(unknownBlockReason()).toMatch(/UNKNOWN/);

@@ -68,11 +68,11 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
       delayMs: opts.confirmation?.delayMs ?? 300,
     });
     if (reconciliation.status === "confirmed") {
-      markConfirmed();
       await opts.onSettled?.(reconciliation);
+      markConfirmed(txid);
     } else if (reconciliation.status === "failed") {
-      markFailed();
       await opts.onSettled?.(reconciliation);
+      markFailed(txid);
     } else {
       markUnknown(txid);
       await opts.onSettled?.(reconciliation);
@@ -84,13 +84,13 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
           if (pendingTxid() !== txid) return;
           const later = await reconcileTransfersLater(txid);
           if (later.status === "failed") {
-            markFailed();
             await opts.onSettled?.(later);
+            markFailed(txid);
             return;
           }
           if (later.status === "confirmed" && later.transfers.length > 0) {
-            markConfirmed();
             await opts.onSettled?.(later);
+            markConfirmed(txid);
             return;
           }
           markUnknown(txid);

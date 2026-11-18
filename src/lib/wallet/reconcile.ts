@@ -35,6 +35,8 @@ export type ReconcileResult =
   | { status: "unknown"; txid: string };
 
 type HyperionAction = {
+  /** The action's own ordinal in the transaction trace. */
+  action_ordinal?: unknown;
   /** Hyperion's parent action ordinal; notification fragments share this value. */
   creator_action_ordinal?: unknown;
   act?: {
@@ -57,23 +59,66 @@ export function parseHyperionTransfers(
   if (!Array.isArray(root.actions) || root.actions.length === 0) return null;
   const executed = root.executed !== false;
   const transfers: TxTransfer[] = [];
-  // Hyperion v4.0.4 could return notification traces as duplicate action
-  // documents. v4.0.5 groups them by creator_action_ordinal. Apply the same
-  // narrow rule client-side for older history endpoints: collapse only rows
-  // with the same explicit parent ordinal. Never content-dedupe, because
-  // genuinely distinct identical transfers in one transaction are valid.
-  const seenCreatorOrdinals = new Set<string>();
-  for (const row of root.actions as HyperionAction[]) {
+  const rows = root.actions as HyperionAction[];
+  const ordinal = (value: unknown): string | null =>
+    (typeof value === "string" && value.length > 0) ||
+    (typeof value === "number" && Number.isFinite(value))
+      ? String(value)
+      : null;
+  const transferSignature = (row: HyperionAction): string | null => {
+    const act = row?.act;
+    const data = act?.data as Record<string, unknown> | undefined;
+    if (act?.name !== "transfer" || !data) return null;
+    return [
+      String(act.account ?? ""),
+      String(data.from ?? ""),
+      String(data.to ?? ""),
+      String(data.quantity ?? ""),
+      String(data.memo ?? ""),
+    ].join("|");
+  };
+
+  // Hyperion includes the root action and can also include a notification
+  // trace for that same transfer. Root actions have creator ordinal 0, which
+  // is shared by every top-level action — treating 0 as a unique key drops
+  // legitimate separate route transfers. Index root transfers by their own
+  // action ordinal, then suppress only a notification whose parent root has
+  // the exact same transfer payload. Distinct root transfers (even identical
+  // ones) remain distinct.
+  const rootTransferSignatures = new Map<string, string>();
+  for (const row of rows) {
+    const ownOrdinal = ordinal(row?.action_ordinal);
+    const creatorOrdinal = ordinal(row?.creator_action_ordinal);
+    const signature = transferSignature(row);
+    if (ownOrdinal && (creatorOrdinal == null || creatorOrdinal === "0") && signature) {
+      rootTransferSignatures.set(ownOrdinal, signature);
+    }
+  }
+
+  const seenRootOrdinals = new Set<string>();
+  const seenNotificationRows = new Set<string>();
+  for (const row of rows) {
     const act = row?.act;
     if (!act || act.name !== "transfer") continue;
-    const ordinal = row?.creator_action_ordinal;
-    if (
-      (typeof ordinal === "string" && ordinal.length > 0) ||
-      (typeof ordinal === "number" && Number.isFinite(ordinal))
-    ) {
-      const key = String(ordinal);
-      if (seenCreatorOrdinals.has(key)) continue;
-      seenCreatorOrdinals.add(key);
+    const ownOrdinal = ordinal(row?.action_ordinal);
+    const creatorOrdinal = ordinal(row?.creator_action_ordinal);
+    const signature = transferSignature(row);
+
+    if (creatorOrdinal && creatorOrdinal !== "0") {
+      // Skip a notification copy only when its parent root action is itself
+      // present and has the same transfer payload.
+      if (signature && rootTransferSignatures.get(creatorOrdinal) === signature) continue;
+      // Older providers may omit action_ordinal. In that case retain the
+      // historical same-parent duplicate collapse without merging distinct
+      // rows that carry separate action ordinals.
+      const duplicateKey = ownOrdinal
+        ? `parent:${creatorOrdinal}:action:${ownOrdinal}`
+        : `parent:${creatorOrdinal}:payload:${signature ?? ""}`;
+      if (seenNotificationRows.has(duplicateKey)) continue;
+      seenNotificationRows.add(duplicateKey);
+    } else if (ownOrdinal) {
+      if (seenRootOrdinals.has(ownOrdinal)) continue;
+      seenRootOrdinals.add(ownOrdinal);
     }
     const contract = typeof act.account === "string" ? act.account : "";
     const data = (act.data ?? {}) as Record<string, unknown>;

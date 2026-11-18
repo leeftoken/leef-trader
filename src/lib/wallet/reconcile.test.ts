@@ -92,6 +92,25 @@ describe("assetDelta", () => {
     expect(assetDelta(transfers, ACCOUNT, "WAX")).toBeCloseTo(-10, 8);
   });
 
+  it("reconciles the observed WAX arbitrage round-trip including the platform fee", () => {
+    const account = "skgaw.wam";
+    const arbTransfers = [
+      {
+        contract: "eosio.token", from: account, to: "swap.alcor",
+        quantity: "1.70445894 WAX", amount: 1.70445894, symbol: "WAX", memo: "swap",
+      },
+      {
+        contract: "eosio.token", from: "swap.alcor", to: account,
+        quantity: "1.65448942 WAX", amount: 1.65448942, symbol: "WAX", memo: "swap output",
+      },
+      {
+        contract: "eosio.token", from: account, to: "smart.ass",
+        quantity: "0.00001623 WAX", amount: 0.00001623, symbol: "WAX", memo: "LEEF Trader platform fee",
+      },
+    ];
+    expect(assetDelta(arbTransfers, account, "WAX", "eosio.token")).toBeCloseTo(-0.04998575, 10);
+  });
+
   it("scopes by contract when given one (spoofed-symbol safety)", () => {
     const spoofed = [
       ...transfers,

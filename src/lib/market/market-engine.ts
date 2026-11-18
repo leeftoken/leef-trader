@@ -41,8 +41,6 @@ import { useBot } from "@/store/bot";
 import { usePortfolio } from "@/store/portfolio";
 import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
 import { useWallet } from "@/store/wallet";
-import { botOnSnapshot } from "@/components/terminal/use-bot-loop";
-import { rebalancerOnSnapshot } from "@/components/terminal/use-portfolio-loop";
 import { syncWalletBalances } from "@/components/terminal/use-wallet-sync";
 import { marketBus } from "./event-bus";
 import { hotPoolIds } from "./execution-state";
@@ -207,6 +205,25 @@ export function patchOnchainPools(
     }
   }
   return { nextLeef, nextAux, changed };
+}
+
+/**
+ * The bot/rebalancer loops load with the first snapshot, so bot-engine,
+ * venue adapters and the signing path stay out of the first-paint graph.
+ */
+let strategiesPromise: Promise<{
+  botOnSnapshot: typeof import("@/components/terminal/use-bot-loop")["botOnSnapshot"];
+  rebalancerOnSnapshot: typeof import("@/components/terminal/use-portfolio-loop")["rebalancerOnSnapshot"];
+}> | null = null;
+function strategies() {
+  strategiesPromise ??= Promise.all([
+    import("@/components/terminal/use-bot-loop"),
+    import("@/components/terminal/use-portfolio-loop"),
+  ]).then(([botLoop, portfolioLoop]) => ({
+    botOnSnapshot: botLoop.botOnSnapshot,
+    rebalancerOnSnapshot: portfolioLoop.rebalancerOnSnapshot,
+  }));
+  return strategiesPromise;
 }
 
 class MarketEngine {
@@ -419,10 +436,7 @@ class MarketEngine {
           // mutex; a newer market snapshot can land while this decision is
           // still resolving. Maintenance still waits for strategy selection
           // and then checks the shared capital lane.
-          void botOnSnapshot(snap)
-            .then(() => {
-              rebalancerOnSnapshot(snap);
-            })
+          void this.runStrategies(snap)
             .catch((err) => {
               const reason = err instanceof Error ? err.message : "strategy evaluation failed";
               useBot.getState().setLastReason(`Strategy evaluation error: ${reason}`);
@@ -527,7 +541,10 @@ class MarketEngine {
         if (freshness.fresh) {
           // Same single lane for chain-spot updates: settle profit selection
           // before maintenance is allowed to inspect/spend inventory.
-          void botOnSnapshot(patchedSnap).then(() => rebalancerOnSnapshot(patchedSnap));
+          void this.runStrategies(patchedSnap).catch((err) => {
+            const reason = err instanceof Error ? err.message : "strategy evaluation failed";
+            useBot.getState().setLastReason(`Strategy evaluation error: ${reason}`);
+          });
         }
       } else {
         // A successful read that finds UNCHANGED state is still fresh chain
@@ -667,6 +684,12 @@ class MarketEngine {
   }
 
   /* ------------------------------ views ---------------------------- */
+
+  private async runStrategies(snap: LeefSnapshot): Promise<void> {
+    const { botOnSnapshot, rebalancerOnSnapshot } = await strategies();
+    await botOnSnapshot(snap);
+    rebalancerOnSnapshot(snap);
+  }
 
   private signerView(): EngineState["signer"] {
     const w = useWallet.getState();

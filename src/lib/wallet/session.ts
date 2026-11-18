@@ -5,10 +5,7 @@
  * trade pops the wallet to sign (Cloud Wallet users can whitelist the
  * swap.alcor transfers to trade without popups).
  */
-import { SessionKit, type Session } from "@wharfkit/session";
-import { WebRenderer } from "@wharfkit/web-renderer";
-import { WalletPluginAnchor } from "@wharfkit/wallet-plugin-anchor";
-import { WalletPluginCloudWallet } from "@wharfkit/wallet-plugin-cloudwallet";
+import type { Session, SessionKit } from "@wharfkit/session";
 import { effectiveEndpoints } from "@/lib/wax/endpoints";
 import { rpcPool } from "@/lib/wax/provider-pool";
 
@@ -24,7 +21,6 @@ export type WalletIdentity = {
   kind: WalletKind;
 };
 
-let kit: SessionKit | null = null;
 let session: Session | null = null;
 
 const CORS_PROXY = "https://proxy.shakespeare.diy/?url=";
@@ -77,10 +73,19 @@ function sessionChainUrls(): string[] {
   return urls.length > 0 ? urls : ["https://wax.greymass.com"];
 }
 
+let kitPromise: Promise<SessionKit> | null = null;
 let kitUrl: string | null = null;
 
-function makeKit(url: string): SessionKit {
+async function makeKit(url: string): Promise<SessionKit> {
   kitUrl = url;
+  // The signing stack is loaded on first wallet use so it never blocks first paint.
+  const [{ SessionKit }, { WebRenderer }, { WalletPluginAnchor }, { WalletPluginCloudWallet }] =
+    await Promise.all([
+      import("@wharfkit/session"),
+      import("@wharfkit/web-renderer"),
+      import("@wharfkit/wallet-plugin-anchor"),
+      import("@wharfkit/wallet-plugin-cloudwallet"),
+    ]);
   return new SessionKit(
     {
       appName: "LEEF Trader",
@@ -92,11 +97,9 @@ function makeKit(url: string): SessionKit {
   );
 }
 
-function getKit(): SessionKit {
-  if (!kit) {
-    kit = makeKit(sessionChainUrls()[0]!);
-  }
-  return kit;
+function getKit(): Promise<SessionKit> {
+  kitPromise ??= makeKit(sessionChainUrls()[0]!);
+  return kitPromise;
 }
 
 /** True for network-level failures where trying the next endpoint helps —
@@ -115,12 +118,12 @@ function isEndpointFailure(err: unknown): boolean {
 }
 
 /** Rebuild the kit on the next curated endpoint after an endpoint failure. */
-function rotateKit(): SessionKit {
+function rotateKit(): Promise<SessionKit> {
   const urls = sessionChainUrls();
   const idx = kitUrl ? urls.indexOf(kitUrl) : -1;
   const next = urls[(idx + 1) % urls.length]!;
-  kit = makeKit(next);
-  return kit;
+  kitPromise = makeKit(next);
+  return kitPromise;
 }
 
 /** Run a SessionKit call with simple endpoint failover (network errors only). */
@@ -129,11 +132,11 @@ async function withKit<T>(fn: (k: SessionKit) => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await fn(getKit());
+      return await fn(await getKit());
     } catch (err) {
       lastErr = err;
       if (!isEndpointFailure(err) || i === attempts - 1) throw err;
-      rotateKit();
+      await rotateKit();
     }
   }
   throw lastErr;
@@ -181,7 +184,7 @@ export async function restoreWallet(): Promise<WalletIdentity | null> {
 
 export async function logoutWallet(): Promise<void> {
   try {
-    if (session) await getKit().logout(session);
+    if (session) await (await getKit()).logout(session);
   } catch {
     /* best effort */
   } finally {

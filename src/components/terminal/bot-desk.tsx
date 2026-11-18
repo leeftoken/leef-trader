@@ -60,7 +60,7 @@ import { isEconomicFailureReason } from "@/lib/wallet/trade-error";
 import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
-import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
+import { executionForRecovery, journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
 import { ensureUnknownExecutionJournal } from "@/lib/wallet/recovery-journal";
 import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradeAccount, tradeIntent as persistedTradeIntent, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
@@ -154,17 +154,16 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
       const matching = entries.filter(
         (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === unresolvedTxid,
       );
-      if (!journalReady || matching.length !== 1) {
+      const entry = executionForRecovery(matching);
+      if (!journalReady || !entry) {
         const reason = matching.length > 1
-          ? "Several live execution records match this transaction. Automatic recovery cannot choose between them; the lock remains in place for support review."
+          ? "Several live execution records match this transaction but their trade details or settlement outcomes conflict. The lock remains in place for support review."
           : !intent && matching.length === 0
             ? "No saved live execution record or persisted trade intent is available for this transaction. The lock remains in place for support review."
-            : "The saved trade intent could not be restored into one unique live execution record. The lock remains in place for support review.";
+            : "The saved trade intent could not be restored into a verifiable live execution record. The lock remains in place for support review.";
         setRecoveryNotice(reason);
         return;
       }
-
-      const entry = matching[0]!;
       const botState = useBot.getState();
       let actualOut = 0;
       if (intent?.stateApplied) {
@@ -205,10 +204,9 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         botState.applyRecoveredExecution(unresolvedTxid, assessment.nextPosition);
       }
 
-      const journalSaved =
-        intent?.stateApplied && entry.status === "confirmed"
-          ? true
-          : await settleUnknownExecution(unresolvedTxid, actualOut);
+      // Always settle through the journal transaction: it also collapses
+      // exact duplicate rows while preserving any already-recorded outcome.
+      const journalSaved = await settleUnknownExecution(unresolvedTxid, actualOut);
       if (!journalSaved) {
         setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
         return;

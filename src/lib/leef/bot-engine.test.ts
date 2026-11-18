@@ -74,6 +74,9 @@ describe("Auto strategy WAX micro fallback", () => {
       goals: { ...DEFAULT_GOALS },
       risk: {
         ...WAX_MICRO_ACTIVE_RISK,
+        // The one-pool atomic round trip exceeds this test's tighter cap,
+        // while a single-hop tape clip remains inside it.
+        maxEchoLossPct: 0.5,
         minTradeUsd: 0.01,
         maxPositionUsd: 100,
         operationalReserveUsd: 0,
@@ -91,7 +94,7 @@ describe("Auto strategy WAX micro fallback", () => {
     expect(decision.kind).toBe("swap");
     if (decision.kind !== "swap") return;
     expect(decision.opportunity?.intent).toBe("volume");
-    expect(decision.minNetPct).toBe(-WAX_MICRO_ACTIVE_RISK.maxEchoLossPct);
+    expect(decision.minNetPct).toBe(-0.5);
     expect(decision.reason).toContain("bounded LEEF volume tape");
     expect(decision.amountIn).toBeGreaterThan(0);
   });

@@ -225,6 +225,13 @@ export function markFailed(): void {
 
 /** Capital may have moved. Do not retry. Keep the txid. */
 export function markUnknown(txid: string): void {
+  // Only a bot-owned signing/broadcast cycle may hold the bot capital lock.
+  // A non-bot UI action cannot create or overwrite one by using the shared signer.
+  if (
+    lock.phase !== "signing" &&
+    !(lock.phase === "broadcasted" && lock.txid === txid) &&
+    !(lock.phase === "unknown" && lock.txid === txid)
+  ) return;
   lock = { phase: "unknown", txid, ...(lock.account ? { account: lock.account } : {}), since: Date.now() };
   persistLock(lock);
 }

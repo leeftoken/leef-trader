@@ -78,6 +78,8 @@ type Lock = {
   phase: TradePhase;
   txid?: string;
   since: number;
+  /** Why a txid-less blocked lock exists; corrupt storage is never user-clearable. */
+  blockedCause?: "interrupted-signing" | "corrupt-storage";
 };
 
 export const TRADE_CYCLE_STORAGE_KEY = "leef-live-capital-lock-v1";
@@ -89,16 +91,17 @@ function readSavedLock(): Lock {
     if (!raw) return { phase: "idle", since: 0 };
     const saved = JSON.parse(raw) as Partial<Lock>;
     if (!Number.isFinite(saved.since) || typeof saved.since !== "number") {
-      return { phase: "blocked", since: Date.now() };
+      return { phase: "blocked", since: Date.now(), blockedCause: "corrupt-storage" };
     }
     if (typeof saved.txid === "string" && /^[a-f0-9]{64}$/i.test(saved.txid)) {
       return { phase: "unknown", txid: saved.txid, since: saved.since };
     }
-    // A reload during signing may have happened after broadcast but before
-    // the wallet returned its txid. Block new capital use until reviewed.
-    return { phase: "blocked", since: saved.since };
+    // External wallets build and broadcast internally, so a reload while the
+    // wallet prompt is open can leave no txid. Keep capital locked until the
+    // user has checked this account's history and explicitly attests no tx ran.
+    return { phase: "blocked", since: saved.since, blockedCause: "interrupted-signing" };
   } catch {
-    return { phase: "blocked", since: Date.now() };
+    return { phase: "blocked", since: Date.now(), blockedCause: "corrupt-storage" };
   }
 }
 
@@ -135,6 +138,11 @@ export function pendingTxid(): string | undefined {
   return lock.txid;
 }
 
+/** Time the current/last live signing attempt began, for recovery review. */
+export function tradeStartedAt(): number {
+  return lock.since;
+}
+
 /** True when a new LIVE transaction must not be submitted. */
 export function liveCapitalBlocked(): boolean {
   return (
@@ -155,6 +163,17 @@ export function beginSigning(): boolean {
 
 export function markBroadcast(txid: string): void {
   lock = { phase: "broadcasted", txid, since: Date.now() };
+  persistLock(lock);
+}
+
+/** Preserve the lock when an external wallet outcome is ambiguous and gave no txid. */
+export function markInterruptedSigning(): void {
+  if (lock.phase !== "signing") return;
+  lock = {
+    phase: "blocked",
+    since: lock.since,
+    blockedCause: "interrupted-signing",
+  };
   persistLock(lock);
 }
 
@@ -186,9 +205,25 @@ export function abortSigning(): void {
   }
 }
 
+/**
+ * Explicit operator acknowledgement after inspecting wallet/account history.
+ * This never clears a lock with a txid, an active signing attempt, or corrupt
+ * storage. The UI must only call it after the user confirms no trade landed.
+ */
+export function confirmInterruptedSigningNoBroadcast(): boolean {
+  if (lock.phase !== "blocked" || lock.txid || lock.blockedCause !== "interrupted-signing") {
+    return false;
+  }
+  lock = { phase: "idle", since: Date.now() };
+  persistLock(lock);
+  return true;
+}
+
 export function unknownBlockReason(): string | null {
   if (lock.phase === "blocked" && !lock.txid) {
-    return "A prior signing attempt was interrupted by reload — inspect wallet activity before submitting another trade";
+    return lock.blockedCause === "corrupt-storage"
+      ? "The saved live-trade lock is malformed — manual support review is required; do not clear it"
+      : "A prior wallet signing attempt was interrupted — inspect wallet activity before submitting another trade";
   }
   if (lock.phase !== "unknown" || !lock.txid) return null;
   return `Previous tx ${lock.txid.slice(0, 10)}… is UNKNOWN / unresolved — not submitting another trade until settlement is reconciled`;

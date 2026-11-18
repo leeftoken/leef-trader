@@ -141,6 +141,47 @@ describe("live capital lock", () => {
     expect(tradeIntent()).toEqual(intent);
   });
 
+
+  it("preserves recovery intent when an interrupted external wallet prompt has no txid", () => {
+    const intent = {
+      action: "buy" as const,
+      tokenIn: "WAX",
+      tokenOut: "LEEF",
+      amountIn: 2,
+      expectedOut: 1200,
+      sizeUsd: 0.04,
+      strategy: "auto",
+      base: "LEEF",
+      quote: "WAX",
+      leefUsd: 0.000033,
+      waxUsd: 0.02,
+    };
+    expect(beginSigning("leefuser", intent)).toBe(true);
+    markInterruptedSigning();
+
+    expect(restoreTradeCycleLock()).toBe("blocked");
+    expect(tradeAccount()).toBe("leefuser");
+    expect(tradeIntent()).toEqual(intent);
+  });
+
+  it("refuses to begin bot signing when supplied recovery intent is invalid", () => {
+    expect(beginSigning("leefuser", {
+      action: "buy",
+      tokenIn: "WAX",
+      tokenOut: "LEEF",
+      amountIn: Number.NaN,
+      expectedOut: 1200,
+      sizeUsd: 0.04,
+      strategy: "auto",
+      base: "LEEF",
+      quote: "WAX",
+      leefUsd: 0.000033,
+      waxUsd: 0.02,
+    })).toBe(false);
+    expect(tradePhase()).toBe("idle");
+    expect(liveCapitalBlocked()).toBe(false);
+  });
+
   it("keeps a bot-owned broadcast timeout locked with its original account", () => {
     expect(beginSigning("leefuser")).toBe(true);
     markUnknown("f".repeat(64));

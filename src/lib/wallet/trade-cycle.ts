@@ -96,10 +96,12 @@ function readSavedLock(): Lock {
     if (typeof saved.txid === "string" && /^[a-f0-9]{64}$/i.test(saved.txid)) {
       return { phase: "unknown", txid: saved.txid, since: saved.since };
     }
-    // External wallets build and broadcast internally, so a reload while the
-    // wallet prompt is open can leave no txid. Keep capital locked until the
-    // user has checked this account's history and explicitly attests no tx ran.
-    return { phase: "blocked", since: saved.since, blockedCause: "interrupted-signing" };
+    // Preserve a corrupt-storage quarantine across reloads. Older, valid
+    // txid-less signing records are treated as interrupted wallet prompts.
+    const blockedCause = saved.blockedCause === "corrupt-storage"
+      ? "corrupt-storage"
+      : "interrupted-signing";
+    return { phase: "blocked", since: saved.since, blockedCause };
   } catch {
     return { phase: "blocked", since: Date.now(), blockedCause: "corrupt-storage" };
   }
@@ -162,6 +164,9 @@ export function beginSigning(): boolean {
 }
 
 export function markBroadcast(txid: string): void {
+  // dispatchActions is also used by non-bot wallet screens. Only a bot cycle
+  // that acquired the signing lock may claim the shared bot capital lock.
+  if (lock.phase !== "signing" && !(lock.phase === "broadcasted" && lock.txid === txid)) return;
   lock = { phase: "broadcasted", txid, since: Date.now() };
   persistLock(lock);
 }

@@ -877,6 +877,10 @@ function retainUnknownBroadcast(input: UnknownBroadcastExecution): boolean {
 
 const unknownJournalRestoreInFlight = new Set<string>();
 
+/** Only an UNKNOWN lock may enter reload recovery; active broadcasts own their journal write. */
+export function shouldResumeUnknownTradeRecovery(phase: string): boolean {
+  return phase === "unknown";
+}
 
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
@@ -888,7 +892,7 @@ export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string):
   // that phase is eligible for automatic recovery.
   if (
     !txid ||
-    tradePhase() !== "unknown" ||
+    !shouldResumeUnknownTradeRecovery(tradePhase()) ||
     !account ||
     !useWallet.getState().canSign() ||
     unknownJournalRestoreInFlight.has(txid)

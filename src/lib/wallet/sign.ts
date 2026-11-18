@@ -28,7 +28,7 @@ import {
 } from "./antelope";
 import { BroadcastTimeoutError, fetchBalances, getChainInfo, pushSigned } from "./chain";
 import { reconcileTransfersLater } from "./reconcile";
-import { markConfirmed, markFailed, markUnknown } from "./trade-cycle";
+import { markBroadcast, markConfirmed, markFailed, markInterruptedSigning, markUnknown } from "./trade-cycle";
 import {
   ALCOR_SWAP_CONTRACT,
   arbFloorViolation,
@@ -325,19 +325,44 @@ async function dispatchActions(opts: {
     const permission = String(sess.permission);
     // Wallets sign with their own session permission — never owner.
     assertSigningPermission(permission);
-    const result = await sess.transact({
-      actions: opts.actions.map((a) => ({
-        account: a.contract,
-        name: a.name,
-        authorization: [{ actor, permission }],
-        data: a.plain,
-      })),
-    });
+    let result: unknown;
+    try {
+      result = await sess.transact({
+        actions: opts.actions.map((a) => ({
+          account: a.contract,
+          name: a.name,
+          authorization: [{ actor, permission }],
+          data: a.plain,
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // A clear user cancellation is a definitive pre-broadcast outcome.
+      // All other wallet errors are ambiguous: Anchor/Cloud Wallet owns the
+      // broadcast boundary and may have submitted before its response failed.
+      if (/user (?:rejected|cancelled|canceled|declined|denied)|(?:rejected|cancelled|canceled|declined) by (?:the )?user/i.test(message)) {
+        throw new TradeError("SIGNING_FAILURE", message);
+      }
+      markInterruptedSigning();
+      throw new TradeError(
+        "TRANSACTION_UNKNOWN",
+        `External wallet returned no definitive transaction result. Inspect account history before another live trade. ${message}`,
+      );
+    }
     const response = (
       result as { response?: { transaction_id?: string; processed?: { id?: string } } }
     ).response;
     const txid = response?.transaction_id ?? response?.processed?.id;
-    if (!txid) throw new Error("Wallet did not return a transaction id");
+    if (!txid) {
+      markInterruptedSigning();
+      throw new TradeError(
+        "TRANSACTION_UNKNOWN",
+        "External wallet completed without returning a transaction id. Inspect account history before another live trade.",
+      );
+    }
+    // Persist as soon as the wallet returns the id, before control returns to
+    // the bot loop. This closes the response→caller reload window.
+    markBroadcast(txid);
     return { txid };
   }
 

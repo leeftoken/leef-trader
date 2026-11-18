@@ -737,6 +737,20 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
   })();
 }
 
+/** Resume a persisted UNKNOWN transaction automatically after app reload. */
+export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
+  const txid = pendingTxid();
+  if (!txid || !account || !useWallet.getState().canSign()) return;
+  const bot = useBot.getState();
+  pollUnknown(txid, {
+    snapshot: snap,
+    account,
+    base: bot.base || "LEEF",
+    quote: bot.quote || "WAX",
+    strategy: bot.strategy,
+  });
+}
+
 /**
  * Evaluate the bot once against a snapshot. Exported so the desk can
  * dry-run ("what would it do now?") and force manual clips.

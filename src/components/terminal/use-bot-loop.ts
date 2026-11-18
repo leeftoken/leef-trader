@@ -903,9 +903,15 @@ export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string):
     strategy: intent?.strategy as typeof bot.strategy | undefined ?? bot.strategy,
   };
   void ensureUnknownExecutionJournal(txid, intent)
-    .then(() => {
-      // pollUnknown still requires a unique execution row and exact on-chain
-      // transfer evidence. Missing/duplicate/legacy metadata remains locked.
+    .then((journalReady) => {
+      if (!journalReady) {
+        bot.setLastReason(
+          `Recovery for ${txid.slice(0, 10)}… is paused because no unique live execution record or valid persisted trade intent exists. Capital remains locked for review.`,
+        );
+        return;
+      }
+      // pollUnknown still requires exact on-chain transfer evidence and
+      // idempotent position/journal reconciliation before it releases capital.
       pollUnknown(txid, context);
     })
     .catch((error) => {

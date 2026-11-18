@@ -106,9 +106,32 @@ describe("live capital lock", () => {
 
   it("does not create a bot capital lock for a wallet action outside a bot signing cycle", () => {
     markBroadcast("d".repeat(64));
+    markUnknown("e".repeat(64));
 
     expect(tradePhase()).toBe("idle");
+    expect(pendingTxid()).toBeUndefined();
     expect(liveCapitalBlocked()).toBe(false);
+  });
+
+  it("keeps a bot-owned broadcast timeout locked with its original account", () => {
+    expect(beginSigning("leefuser")).toBe(true);
+    markUnknown("f".repeat(64));
+
+    expect(tradePhase()).toBe("unknown");
+    expect(tradeAccount()).toBe("leefuser");
+    expect(pendingTxid()).toBe("f".repeat(64));
+    expect(liveCapitalBlocked()).toBe(true);
+  });
+
+  it("allows the bot loop to keep the same transaction unresolved after broadcast", () => {
+    expect(beginSigning("leefuser")).toBe(true);
+    markBroadcast("9".repeat(64));
+    markUnknown("9".repeat(64));
+
+    expect(tradePhase()).toBe("unknown");
+    expect(tradeAccount()).toBe("leefuser");
+    expect(pendingTxid()).toBe("9".repeat(64));
+    expect(liveCapitalBlocked()).toBe(true);
   });
 
   it("does not allow user acknowledgement to clear corrupt persisted lock data", () => {

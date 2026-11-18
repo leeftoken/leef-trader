@@ -6,6 +6,9 @@ import { defineConfig } from "vitest/config";
 
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
+  // GitHub Pages serves the site under /<repo-name>/ (deploy.yml sets VITE_BASE);
+  // Vercel and dev serve at root.
+  base: process.env.VITE_BASE ?? "/",
   server: {
     host: "::",
     port: 8080,

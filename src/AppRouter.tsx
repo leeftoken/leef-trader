@@ -15,7 +15,7 @@ const NIP19Page = lazy(() =>
 
 export function AppRouter() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ScrollToTop />
       {/* No-op outside Telegram; see src/lib/telegram/miniapp.ts */}
       <TelegramMiniApp />

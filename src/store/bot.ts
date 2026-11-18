@@ -12,6 +12,10 @@ import {
 import { migrateRiskToUsd } from "@/lib/leef/risk-usd";
 import { migrateSaferRiskDefaults } from "@/lib/leef/risk-defaults-migration";
 import {
+  shouldUpgradeLegacyWaxDefaults,
+  WAX_MICRO_ACTIVE_RISK,
+} from "@/lib/leef/risk-profiles";
+import {
   DEFAULT_GROWTH_TARGETS,
   normalizeTargets,
   type GrowthMode,
@@ -479,6 +483,13 @@ export const useBot = create<BotState>()(
         }>;
         const usd = migrateRiskToUsd(p.risk);
         const safer = version < 13 ? migrateSaferRiskDefaults(p.goals, p.risk) : null;
+        const waxMicroUpgrade =
+          version < 16 &&
+          (p.base ?? "LEEF").toUpperCase() === "LEEF" &&
+          (p.quote ?? "WAX").toUpperCase() === "WAX" &&
+          shouldUpgradeLegacyWaxDefaults(p.risk)
+            ? WAX_MICRO_ACTIVE_RISK
+            : null;
         const { clipWax: _c, maxPositionWax: _m, ...restRisk } = (p.risk ?? {}) as Record<string, unknown>;
         void _c;
         void _m;

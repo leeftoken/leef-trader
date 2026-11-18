@@ -11,6 +11,7 @@ import {
   markFailed,
   markInterruptedSigning,
   markUnknown,
+  markTradeStateApplied,
   pendingTxid,
   restoreTradeCycleLock,
   tradeAccount,
@@ -180,6 +181,33 @@ describe("live capital lock", () => {
     })).toBe(false);
     expect(tradePhase()).toBe("idle");
     expect(liveCapitalBlocked()).toBe(false);
+  });
+
+
+  it("persists whether the bot state already includes a confirmed fill", () => {
+    const intent = {
+      action: "buy" as const,
+      tokenIn: "WAX",
+      tokenOut: "LEEF",
+      amountIn: 2,
+      expectedOut: 1200,
+      sizeUsd: 0.04,
+      strategy: "auto",
+      base: "LEEF",
+      quote: "WAX",
+      leefUsd: 0.000033,
+      waxUsd: 0.02,
+    };
+    expect(beginSigning("leefuser", intent)).toBe(true);
+    markBroadcast("8".repeat(64));
+
+    expect(markTradeStateApplied("f".repeat(64))).toBe(false);
+    expect(tradeIntent()?.stateApplied).toBeUndefined();
+
+    expect(markTradeStateApplied("8".repeat(64))).toBe(true);
+    expect(tradeIntent()?.stateApplied).toBe(true);
+    expect(restoreTradeCycleLock()).toBe("unknown");
+    expect(tradeIntent()?.stateApplied).toBe(true);
   });
 
   it("keeps a bot-owned broadcast timeout locked with its original account", () => {

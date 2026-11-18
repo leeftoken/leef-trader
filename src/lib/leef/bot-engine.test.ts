@@ -64,15 +64,19 @@ function snapshot(): LeefSnapshot {
 
 describe("Auto strategy WAX micro fallback", () => {
   it("uses a bounded multi-pool tape clip after no profitable candidate or atomic echo exists", () => {
+    const snap = snapshot();
     const decision = evaluateBot({
       now: Date.now(),
-      snap: snapshot(),
+      snap,
       series: [],
       running: true,
       strategy: "auto",
       goals: { ...DEFAULT_GOALS },
       risk: {
         ...WAX_MICRO_ACTIVE_RISK,
+        // The one-pool atomic round trip exceeds this test's tighter cap,
+        // while a single-hop tape clip remains inside it.
+        maxEchoLossPct: 0.5,
         minTradeUsd: 0.01,
         maxPositionUsd: 100,
         operationalReserveUsd: 0,
@@ -83,14 +87,14 @@ describe("Auto strategy WAX micro fallback", () => {
       cooldownUntil: 0,
       tradesThisHour: 0,
       sessionRealizedUsd: 0,
-      sessionStartEquityUsd: 1_000,
+      sessionStartEquityUsd: 1,
       echoCostUsd: 0,
       flowStates: null,
     });
     expect(decision.kind).toBe("swap");
     if (decision.kind !== "swap") return;
     expect(decision.opportunity?.intent).toBe("volume");
-    expect(decision.minNetPct).toBe(-WAX_MICRO_ACTIVE_RISK.maxEchoLossPct);
+    expect(decision.minNetPct).toBe(-0.5);
     expect(decision.reason).toContain("bounded LEEF volume tape");
     expect(decision.amountIn).toBeGreaterThan(0);
   });

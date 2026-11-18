@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planLeefTape, planNextAction } from "./next-action";
+import { planLeefTape, planNextAction, selectBestTapeClip } from "./next-action";
 import type { AuxPool, LeefPool, LeefSnapshot } from "./types";
 
 const WAX_USD = 0.02;
@@ -123,6 +123,41 @@ describe("planNextAction", () => {
     if (plan) {
       expect(plan.tokenOut === "WAXUSDC" && plan.netUsd > 0).toBe(false);
     }
+  });
+});
+
+describe("selectBestTapeClip", () => {
+  const clip = (usdIn: number, netUsd: number) => ({
+    tokenIn: "WAX",
+    tokenOut: "LEEF",
+    amountIn: usdIn,
+    route: {} as never,
+    usdIn,
+    usdOut: usdIn + netUsd,
+    netUsd,
+    netPct: usdIn > 0 ? (netUsd / usdIn) * 100 : 0,
+  });
+
+  it("chooses the highest net dollar outcome, not the largest notional", () => {
+    const lowSizeProfit = clip(0.1, 0.001);
+    const highSizeLoss = clip(1, -0.004);
+    expect(selectBestTapeClip([highSizeLoss, lowSizeProfit])).toBe(lowSizeProfit);
+  });
+
+  it("when all clips are negative, chooses the smallest absolute loss", () => {
+    const largerLoss = clip(1, -0.004);
+    const smallerLoss = clip(0.25, -0.0002);
+    expect(selectBestTapeClip([largerLoss, smallerLoss])).toBe(smallerLoss);
+  });
+
+  it("uses greater notional only as a tie-break after equal net profit", () => {
+    const smaller = clip(0.25, 0.001);
+    const larger = clip(0.5, 0.001);
+    expect(selectBestTapeClip([smaller, larger])).toBe(larger);
+  });
+
+  it("returns null when no route candidates exist", () => {
+    expect(selectBestTapeClip([])).toBeNull();
   });
 });
 

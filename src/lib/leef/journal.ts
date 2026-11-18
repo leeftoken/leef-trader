@@ -712,27 +712,22 @@ export function executionForRecovery(entries: JournalEntry[]): JournalEntry | nu
 }
 
 /**
- * True when the saved execution identity and any recorded realized output are
- * consistent with confirmed chain transfers. This is used only as a fallback
- * to release the trading lock if IndexedDB refuses the journal write; it does
- * not mark the journal settled or manufacture an audit record.
+ * Pure confirmation that the journal rows already read by the caller agree
+ * with a verified on-chain output amount. It permits trading to resume if the
+ * IndexedDB write itself fails, but never if identity or realized output data
+ * conflicts. This does not mark the journal settled.
  */
-export async function liveExecutionOutcomeMatchesChain(
+export function liveExecutionOutcomeMatchesChain(
+  entries: JournalEntry[],
   txid: string,
   actualOut: number,
-): Promise<boolean> {
+): boolean {
   if (!/^[a-f0-9]{64}$/i.test(txid) || !Number.isFinite(actualOut)) return false;
-  try {
-    const entries = (await allEntries()).filter(
-      (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
-    );
-    if (!executionForRecovery(entries)) return false;
-    return entries.every((entry) =>
-      entry.actualOut == null || Math.abs(entry.actualOut - actualOut) <= 1e-12
-    );
-  } catch {
-    return false;
-  }
+  if (!executionForRecovery(entries)) return false;
+  return entries.every((entry) =>
+    entry.txid === txid &&
+    (entry.actualOut == null || Math.abs(entry.actualOut - actualOut) <= 1e-12)
+  );
 }
 
 

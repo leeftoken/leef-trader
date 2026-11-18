@@ -29,6 +29,26 @@ export const WAX_MICRO_ACTIVE_RISK: BotRisk = {
 };
 
 
+
+/**
+ * Higher-risk WAX preset for users who deliberately want more frequent
+ * activity on thin books. The wider impact/slippage envelope is still
+ * constrained by the exact router min-out, a finite per-echo loss ceiling,
+ * a finite session echo budget, and the account-level session breakers.
+ */
+export const WAX_HIGH_ACTIVITY_RISK: BotRisk = {
+  ...WAX_MICRO_ACTIVE_RISK,
+  maxImpactPct: 5,
+  cooldownSec: 10,
+  maxTradesHour: 120,
+  slippage: 1,
+  minConfidence: 45,
+  minEdgePct: 0.15,
+  maxEchoLossPct: 1.75,
+  echoBudgetUsd: 10,
+  maxPoolSharePct: 10,
+};
+
 /**
  * Only upgrade the exact pre-WAX-micro product defaults. Any user who changed
  * a risk knob keeps their own profile; this is not a blanket risk reset.

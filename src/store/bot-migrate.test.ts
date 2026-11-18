@@ -44,6 +44,7 @@ describe("bot store v14 migration", () => {
     expect(out.risk.cooldownSec).toBe(10);
     expect(out.risk.maxImpactPct).toBe(4);
     expect(out.risk.maxPoolSharePct).toBe(7.5);
+    expect(out.riskMigrationNotice).toMatch(/WAX Micro Active profile applied/);
   });
 
   it("does not overwrite a customized legacy WAX risk profile", () => {

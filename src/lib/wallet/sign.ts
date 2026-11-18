@@ -415,7 +415,11 @@ async function dispatchActions(opts: {
   const digest = signingDigest(rawInfo.chain_id, packedTx);
   const signature = signDigest(digest);
   try {
-    return await pushSigned(packedTransactionBody(packedTx, [signature]));
+    const pushed = await pushSigned(packedTransactionBody(packedTx, [signature]));
+    // Save the transaction id at the signer boundary before returning control
+    // to the bot loop; a page reload in the next microtask must still recover it.
+    if (opts.botManaged) markBroadcast(pushed.txid);
+    return pushed;
   } catch (err) {
     if (err instanceof BroadcastTimeoutError) {
       // The node never answered — the transaction may still land. Lock the

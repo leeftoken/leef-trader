@@ -325,12 +325,24 @@ export function markReconciling(txid: string): void {
   persistLock(lock);
 }
 
-export function markConfirmed(): void {
+function canSettleLock(txid: string): boolean {
+  return (
+    /^[a-f0-9]{64}$/i.test(txid) &&
+    lock.txid === txid &&
+    (lock.phase === "broadcasted" || lock.phase === "reconciling" || lock.phase === "unknown")
+  );
+}
+
+/** Release only the exact live transaction whose position/journal was reconciled. */
+export function markConfirmed(txid: string): void {
+  if (!canSettleLock(txid)) return;
   lock = { phase: "idle", since: Date.now() };
   persistLock(lock);
 }
 
-export function markFailed(): void {
+/** Release only the exact live transaction independently confirmed failed. */
+export function markFailed(txid: string): void {
+  if (!canSettleLock(txid)) return;
   lock = { phase: "idle", since: Date.now() };
   persistLock(lock);
 }

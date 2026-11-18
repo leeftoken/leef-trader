@@ -536,16 +536,10 @@ async function releaseBotCapitalAfterJournal(
     return true;
   }
 
+  // Do not synthesize a second row from the intent in the hot execution
+  // path. A failed durability check remains locked and is handled by the
+  // explicit UNKNOWN recovery path after the normal execution cycle ends.
   markUnknown(txid);
-  // Recreate from the persisted intent only after distinguishing whether bot
-  // state was already applied. A stateApplied intent restores a confirmed
-  // row and can release here without running the position mutation twice.
-  const intent = persistedTradeIntent();
-  const restored = await ensureUnknownExecutionJournal(txid, intent);
-  if (restored && intent?.stateApplied) {
-    markConfirmed(txid);
-    return true;
-  }
   return false;
 }
 

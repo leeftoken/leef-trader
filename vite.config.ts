@@ -49,12 +49,11 @@ export default defineConfig(() => ({
           ) {
             return "vendor-react";
           }
-          // Wharfkit / Antelope session stack.
-          if (
-            /node_modules\/(@wharfkit|@greymass)\//.test(id)
-          ) {
-            return "vendor-wharfkit";
-          }
+          // Wharfkit / Antelope session stack: intentionally NOT manual-chunked.
+          // It is only reachable through dynamic imports in wallet/session.ts,
+          // and forcing it into a manual chunk dragged the shared TS interop
+          // helpers into that chunk, pulling the whole wallet stack back into
+          // the initial modulepreload graph.
           // Crypto primitives used by the wallet/key code (initial graph),
           // kept apart so they don't drag the Nostr chunk in with them.
           if (/node_modules\/(@noble|@scure)\//.test(id)) {

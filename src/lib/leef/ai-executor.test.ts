@@ -289,7 +289,7 @@ describe("parseAiProposal", () => {
     }, context)).toBeNull();
   });
 
-  it("uses TypeSafe Noul probability confidence without the incorrect doubled-distance conversion", () => {
+  it("uses action Choice confidence while gating Noul answers as direct probabilities", () => {
     const p = parseAiProposal(answers({
       [AI_QID.action]: { type: "choice", choice: "buy", confidence: 0.98 },
       [AI_QID.sizeBucket]: { type: "choice", choice: "half", confidence: 0.98 },

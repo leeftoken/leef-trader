@@ -36,13 +36,14 @@ function pool(): LeefPool {
 
 function snapshot(): LeefSnapshot {
   const p = pool();
-  const leefUsd = p.usdPerLeef;
+  const waxPerLeef = 50_000 / 500_000_000;
+  const leefUsd = waxPerLeef * WAX_USD;
   return {
     source: "live",
     fetchedAt: new Date().toISOString(),
     waxUsd: WAX_USD,
     leefUsd,
-    waxPerLeef: p.waxPerLeef,
+    waxPerLeef,
     pools: [p],
     aux: [],
     trades: [],
@@ -54,7 +55,7 @@ function snapshot(): LeefSnapshot {
       },
       {
         symbol: "LEEF", contract: "leefmaincorp", decimals: 4,
-        alcorId: "leef-leefmaincorp", poolId: p.id, waxPerToken: p.waxPerLeef,
+        alcorId: "leef-leefmaincorp", poolId: p.id, waxPerToken: waxPerLeef,
         usdPrice: leefUsd, tvlUsd: p.tvlUsd, stable: false,
       },
     ],

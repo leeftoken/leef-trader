@@ -30,6 +30,21 @@ describe("tokenCatalog contract identity", () => {
     expect(catalog.some((token) => token.symbol === "BAD")).toBe(false);
   });
 
+  it("keeps canonical WAX precision even if a snapshot reports stale precision", () => {
+    const snapshot = {
+      pools: [],
+      aux: [],
+      universe: [
+        { symbol: "WAX", contract: "eosio.token", decimals: 4 },
+      ],
+    } as never;
+    expect(metaOf("WAX@eosio.token", snapshot)).toMatchObject({
+      symbol: "WAX",
+      contract: "eosio.token",
+      decimals: 8,
+    });
+  });
+
   it("retains venue-provided precision for discovered token contracts", () => {
     const snapshot = {
       pools: [],

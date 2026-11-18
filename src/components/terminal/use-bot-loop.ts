@@ -78,6 +78,7 @@ import {
   markConfirmed,
   markFailed,
   markUnknown,
+  pendingTxid,
   recordCycleTimings,
   unknownBlockReason,
 } from "@/lib/wallet/trade-cycle";

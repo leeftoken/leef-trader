@@ -212,7 +212,6 @@ export function planLeefTape(
   const requestedHops = Number.isFinite(opts.maxHops) ? Math.floor(opts.maxHops ?? 4) : 4;
   const maxHops = Math.min(MAX_ROUTE_HOPS, Math.max(1, requestedHops));
   const maxLoss = Math.max(0, opts.maxLossPct ?? 1.5);
-  const seed = opts.seed ?? Date.now();
   const base = (opts.base ?? "LEEF").toUpperCase();
   const quote = (opts.quote ?? "WAX").toUpperCase();
   const minUsd = Math.max(0, opts.minUsd);
@@ -239,10 +238,10 @@ export function planLeefTape(
     if (capUsd + 1e-12 < minUsd) continue;
     const loUsd = minUsd;
     const hiUsd = capUsd;
-    const testedAmounts = new Set<number>();
+    const testedAmounts = new Set<string>();
 
     const tryPair = (from: string, to: string, amt: number) => {
-      const amountKey = Math.round(amt * 1e8);
+      const amountKey = `${from}>${to}:${Math.round(amt * 1e8)}`;
       if (!(amt > 0) || testedAmounts.has(amountKey)) return;
       testedAmounts.add(amountKey);
       const route = bestRouteWithinHops(graph, amt, from, to, maxHops);

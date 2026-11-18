@@ -135,6 +135,11 @@ export function pendingTxid(): string | undefined {
   return lock.txid;
 }
 
+/** Timestamp of an interrupted signing lock that has no saved transaction id. */
+export function interruptedSigningSince(): number | null {
+  return lock.phase === "blocked" && !lock.txid ? lock.since : null;
+}
+
 /** True when a new LIVE transaction must not be submitted. */
 export function liveCapitalBlocked(): boolean {
   return (

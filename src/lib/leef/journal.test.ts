@@ -142,3 +142,64 @@ describe("toNdjson", () => {
     expect(toNdjson([])).toBe("");
   });
 });
+
+
+describe("duplicate live execution recovery", () => {
+  const liveExecution = (over: Partial<JournalEntry> = {}): JournalEntry => e({
+    kind: "execution",
+    mode: "live",
+    action: "arb",
+    strategy: "volume",
+    tokenIn: "WAX@eosio.token",
+    tokenOut: "WAX@eosio.token",
+    amountIn: 1.70445894,
+    expectedOut: 1.65448942,
+    sizeUsd: 0.034,
+    txid: "15668e9946bfd34a95688f6c85b7ca002139b9e9bd6c54a65d8c213a720aff1d",
+    status: "unknown",
+    ...over,
+  });
+
+  it("selects one logical execution when an exact unknown/confirmed duplicate pair exists", async () => {
+    const { executionForRecovery } = await import("./journal");
+    const unknown = liveExecution({ ts: 1_000, status: "unknown" });
+    const confirmed = liveExecution({
+      ts: 1_001,
+      status: "confirmed",
+      actualOut: -0.04998575,
+      reconciledAt: 1_002,
+    });
+
+    expect(executionForRecovery([unknown, confirmed])).toEqual(unknown);
+  });
+
+  it("rejects duplicates whose trade identity differs", async () => {
+    const { executionForRecovery } = await import("./journal");
+    const unknown = liveExecution({ ts: 1_000, status: "unknown" });
+    const differentAmount = liveExecution({
+      ts: 1_001,
+      status: "confirmed",
+      amountIn: 1.8,
+    });
+
+    expect(executionForRecovery([unknown, differentAmount])).toBeNull();
+  });
+
+  it("rejects duplicate records with conflicting settled outcomes", async () => {
+    const { executionForRecovery } = await import("./journal");
+    const first = liveExecution({
+      ts: 1_000,
+      status: "confirmed",
+      actualOut: -0.04,
+      reconciledAt: 1_002,
+    });
+    const second = liveExecution({
+      ts: 1_001,
+      status: "confirmed",
+      actualOut: -0.06,
+      reconciledAt: 1_003,
+    });
+
+    expect(executionForRecovery([first, second])).toBeNull();
+  });
+});

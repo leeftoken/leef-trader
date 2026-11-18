@@ -446,11 +446,9 @@ export function buildAiCandidateKey(
   return JSON.stringify(fingerprint);
 }
 
-/** Noul → confidence in the yes/no answer (0.5 = uncertain, 1 = certain). */
+/** Optional confidence-style transform for Noul P(yes), per TypeSafe semantics. */
 function noulConfidence(noul: number): number {
-  // System One Noul is P(yes), not a centered confidence score. Confidence
-  // is the probability of the selected side: max(P(yes), P(no)).
-  return Math.max(noul, 1 - noul);
+  return Math.abs(2 * noul - 1);
 }
 
 function choiceOf(
@@ -462,12 +460,18 @@ function choiceOf(
   // TypeSafe providers may vary only in casing/whitespace or omit the scalar
   // confidence while returning the selected choice's probability map.
   const choice = a.choice.trim().toLowerCase();
-  const mappedConfidence = a.probabilities?.[choice];
+  const distribution = a.probabilities ? Object.values(a.probabilities) : [];
+  const distributionValid =
+    distribution.length >= 2 &&
+    distribution.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
+    Math.abs(distribution.reduce((sum, p) => sum + p, 0) - 1) <= 0.02;
+  const peak = distributionValid ? Math.max(...distribution) : Number.NaN;
+  const derivedConfidence = distributionValid
+    ? (peak - 1 / distribution.length) / (1 - 1 / distribution.length)
+    : Number.NaN;
   const confidence = typeof a.confidence === "number"
     ? a.confidence
-    : typeof mappedConfidence === "number"
-      ? mappedConfidence
-      : Number.NaN;
+    : derivedConfidence;
   if (
     !choice ||
     !Number.isFinite(confidence) ||
@@ -519,10 +523,12 @@ export function parseAiProposal(
   const stress = noulOf(answers, AI_QID.riskStress);
   if (execOk == null || stress == null) return null;
 
+  // The action Choice confidence is the decision confidence. Noul values
+  // are direct P(yes) safety probabilities and are gated below as probabilities;
+  // they must not be converted into generic confidence and mixed with Choice.
+  // The size bucket is a bounded sizing preference, not an authorization signal.
   const judgments: { qid: string; confidence: number }[] = [
     { qid: AI_QID.action, confidence: actionAns.confidence },
-    { qid: AI_QID.riskExecute, confidence: noulConfidence(execOk) },
-    { qid: AI_QID.riskStress, confidence: noulConfidence(stress) },
   ];
   const params: Record<string, string> = {};
   const rationale: string[] = ["action=" + action + " p=" + actionAns.confidence.toFixed(2)];
@@ -539,7 +545,6 @@ export function parseAiProposal(
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
     params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);
-    judgments.push({ qid: AI_QID.sizeBucket, confidence: size.confidence });
     rationale.push("size=" + size.choice + " p=" + size.confidence.toFixed(2));
   }
 

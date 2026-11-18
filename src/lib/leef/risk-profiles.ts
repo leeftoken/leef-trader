@@ -15,7 +15,11 @@ export const WAX_MICRO_ACTIVE_RISK: BotRisk = {
   slippage: 0.8,
   minConfidence: 55,
   minEdgePct: 0.2,
-  maxEchoLossPct: 0.5,
+  // Two 0.3% LP legs already cost about 0.6% before impact. A 0.5% cap
+  // made the active volume profile structurally unable to complete ordinary
+  // round trips. Allow a bounded 1.5% micro-market budget; the separate
+  // session echo budget and account circuit breakers remain authoritative.
+  maxEchoLossPct: 1.5,
   echoBudgetUsd: DEFAULT_RISK.echoBudgetUsd,
   volumeFlowGateMin: 0,
   minNetEdgePct: DEFAULT_RISK.minNetEdgePct,

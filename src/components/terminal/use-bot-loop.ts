@@ -837,10 +837,54 @@ function retainUnknownBroadcast(input: UnknownBroadcastExecution): boolean {
   return true;
 }
 
+const unknownJournalRestoreInFlight = new Set<string>();
+
+/**
+ * Restore a missing execution row from the exact non-secret candidate saved
+ * in the live lock. journalAll flushes its write buffer before reading, so
+ * successful return proves one unique row exists for pollUnknown/settlement.
+ */
+async function ensureUnknownExecutionJournal(
+  txid: string,
+  intent: BotTradeIntent | undefined,
+): Promise<boolean> {
+  const matches = (await journalAll()).filter(
+    (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+  );
+  if (matches.length === 1) return true;
+  if (matches.length !== 0 || !intent) return false;
+
+  journal({
+    kind: "execution",
+    action: intent.action,
+    strategy: intent.strategy,
+    mode: "live",
+    tokenIn: intent.tokenIn,
+    tokenOut: intent.tokenOut,
+    amountIn: intent.amountIn,
+    expectedOut: intent.expectedOut,
+    txid,
+    status: "unknown",
+    sizeUsd: intent.sizeUsd,
+    predEdgePct: intent.predEdgePct,
+    poolIds: intent.poolIds,
+    hops: intent.hops,
+    venues: intent.venues,
+    leefUsd: intent.leefUsd,
+    waxUsd: intent.waxUsd,
+    reason: "Restored unresolved execution metadata from the persisted bot signing intent after reload",
+  });
+
+  const restored = (await journalAll()).filter(
+    (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+  );
+  return restored.length === 1 && restored[0]?.status === "unknown";
+}
+
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
   const txid = pendingTxid();
-  if (!txid || !account || !useWallet.getState().canSign()) return;
+  if (!txid || !account || !useWallet.getState().canSign() || unknownJournalRestoreInFlight.has(txid)) return;
   const lockedAccount = tradeAccount();
   if (lockedAccount && lockedAccount !== account) {
     useBot.getState().setLastReason(
@@ -848,14 +892,28 @@ export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string):
     );
     return;
   }
+  unknownJournalRestoreInFlight.add(txid);
+  const intent = persistedTradeIntent();
   const bot = useBot.getState();
-  pollUnknown(txid, {
+  const context = {
     snapshot: snap,
     account,
-    base: bot.base || "LEEF",
-    quote: bot.quote || "WAX",
-    strategy: bot.strategy,
-  });
+    base: intent?.base || bot.base || "LEEF",
+    quote: intent?.quote || bot.quote || "WAX",
+    strategy: intent?.strategy as typeof bot.strategy | undefined ?? bot.strategy,
+  };
+  void ensureUnknownExecutionJournal(txid, intent)
+    .then(() => {
+      // pollUnknown still requires a unique execution row and exact on-chain
+      // transfer evidence. Missing/duplicate/legacy metadata remains locked.
+      pollUnknown(txid, context);
+    })
+    .catch((error) => {
+      bot.setLastReason(
+        `Could not restore the unresolved execution record for ${txid.slice(0, 10)}…: ${error instanceof Error ? error.message : "journal unavailable"}. Capital remains locked.`,
+      );
+    })
+    .finally(() => unknownJournalRestoreInFlight.delete(txid));
 }
 
 /**

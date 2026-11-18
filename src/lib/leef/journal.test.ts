@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateEntries,
+  executionForRecovery,
+  liveExecutionOutcomeMatchesChain,
   reasonSignature,
   toNdjson,
   type JournalEntry,
@@ -183,6 +185,40 @@ describe("duplicate live execution recovery", () => {
       reconciledAt: 1_002,
     });
     expect(executionForRecovery([unknown, confirmed])).toEqual(unknown);
+  });
+
+  it("accepts optional route metadata missing from one otherwise identical duplicate", () => {
+    const unknown = liveExecution({
+      ts: 1_000,
+      status: "unknown",
+      poolIds: [101, 202],
+      hops: 2,
+      venues: ["alcor"],
+    });
+    const confirmed = liveExecution({
+      ts: 1_001,
+      status: "confirmed",
+      poolIds: undefined,
+      hops: 2,
+      venues: ["alcor"],
+      actualOut: -0.04998575,
+      reconciledAt: 1_002,
+    });
+    expect(executionForRecovery([unknown, confirmed])).toEqual(unknown);
+  });
+
+  it("allows trading fallback only when saved execution outcomes agree with chain transfers", () => {
+    const unknown = liveExecution({ ts: 1_000, status: "unknown" });
+    const confirmed = liveExecution({
+      ts: 1_001,
+      status: "confirmed",
+      actualOut: -0.04998575000000001,
+      reconciledAt: 1_002,
+    });
+    const txid = unknown.txid!;
+    expect(liveExecutionOutcomeMatchesChain([unknown, confirmed], txid, -0.04998575)).toBe(true);
+    expect(liveExecutionOutcomeMatchesChain([unknown, confirmed], txid, -0.06)).toBe(false);
+    expect(liveExecutionOutcomeMatchesChain([unknown], "b".repeat(64), -0.04998575)).toBe(false);
   });
 
   it("rejects duplicates whose trade identity differs", async () => {

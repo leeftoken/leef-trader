@@ -90,6 +90,8 @@ export type BotTradeIntent = {
   poolIds?: number[];
   hops?: number;
   venues?: string[];
+  /** True only after the deterministic bot state updates were persisted for this fill. */
+  stateApplied?: boolean;
 };
 
 type Lock = {
@@ -141,6 +143,10 @@ function normalizeTradeIntent(value: unknown): BotTradeIntent | undefined {
     leefUsd: v.leefUsd,
     waxUsd: v.waxUsd,
   };
+  if (v.stateApplied !== undefined) {
+    if (typeof v.stateApplied !== "boolean") return undefined;
+    intent.stateApplied = v.stateApplied;
+  }
   if (v.predEdgePct !== undefined) {
     if (!finite(v.predEdgePct)) return undefined;
     intent.predEdgePct = v.predEdgePct;
@@ -258,6 +264,25 @@ export function tradeAccount(): string | undefined {
 /** Non-secret candidate metadata persisted for safe read-only recovery after reload. */
 export function tradeIntent(): BotTradeIntent | undefined {
   return lock.intent;
+}
+
+/**
+ * Persist that the bot's position/statistics mutation already reflects this
+ * exact confirmed txid. Reload recovery then finishes Journal/lock settlement
+ * without applying the same fill to bot state a second time.
+ */
+export function markTradeStateApplied(txid: string): boolean {
+  if (
+    lock.txid !== txid ||
+    (lock.phase !== "broadcasted" && lock.phase !== "reconciling" && lock.phase !== "unknown") ||
+    !lock.intent
+  ) return false;
+  lock = {
+    ...lock,
+    intent: { ...lock.intent, stateApplied: true },
+  };
+  persistLock(lock);
+  return true;
 }
 
 /** True when a new LIVE transaction must not be submitted. */

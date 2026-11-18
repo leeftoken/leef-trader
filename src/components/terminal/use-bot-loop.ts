@@ -78,7 +78,11 @@ import {
   markConfirmed,
   markFailed,
   markUnknown,
+  markTradeStateApplied,
   pendingTxid,
+  tradeAccount,
+  tradeIntent as persistedTradeIntent,
+  type BotTradeIntent,
   recordCycleTimings,
   unknownBlockReason,
 } from "@/lib/wallet/trade-cycle";
@@ -501,6 +505,50 @@ function routeJournalMeta(route: SwapRoute, amountIn: number, pxIn: number) {
   };
 }
 
+function routeIntentMeta(route: SwapRoute): Pick<BotTradeIntent, "poolIds" | "hops" | "venues"> {
+  return {
+    poolIds: [...route.poolIds],
+    hops: route.legs.length,
+    venues: [...new Set(route.legs.map((leg) => leg.venue ?? "alcor"))],
+  };
+}
+
+/**
+ * Release live capital only after the successful fill has updated bot state
+ * and its unique confirmed execution row is durably present in the journal.
+ * Any missing, duplicate or unsettled row keeps the matching txid locked.
+ */
+async function releaseBotCapitalAfterJournal(
+  txid: string,
+  action: BotTradeIntent["action"],
+): Promise<boolean> {
+  const rows = (await journalAll()).filter(
+    (entry) =>
+      entry.kind === "execution" &&
+      entry.mode === "live" &&
+      entry.txid === txid &&
+      entry.action === action,
+  );
+  if (rows.length === 1 && rows[0]?.status === "confirmed") {
+    markConfirmed(txid);
+    return true;
+  }
+
+  markUnknown(txid);
+  // Recreate from the persisted intent only after distinguishing whether bot
+  // state was already applied. A stateApplied intent restores a confirmed
+  // row and can release here without running the position mutation twice.
+  const intent = persistedTradeIntent();
+  const restored = await ensureUnknownExecutionJournal(txid, intent);
+  if (restored && intent?.stateApplied) {
+    markConfirmed(txid);
+    return true;
+  }
+  return false;
+}
+
+
+
 /**
  * Capture a route-scoped market fixture (Phase 3 market memory): just the
  * pools on the candidate routes, the involved prices, and the market context
@@ -639,7 +687,7 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
       if (pendingTxid() !== txid) return;
 
       if (rec.status === "failed") {
-        markFailed();
+        markFailed(txid);
         useBot.getState().setLastReason(
           `Transaction ${txid.slice(0, 10)}… was independently confirmed failed on-chain; no fill was booked.`,
         );
@@ -715,7 +763,7 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
         return;
       }
 
-      markConfirmed();
+      markConfirmed(txid);
       useBot.getState().setLastReason(
         `Transaction ${txid.slice(0, 10)}… automatically reconciled from confirmed chain transfers. Live trading can resume; historical P&L was not estimated.`,
       );
@@ -737,18 +785,190 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
   })();
 }
 
+type UnknownBroadcastExecution = {
+  action: "buy" | "sell" | "swap" | "arb";
+  account: string;
+  base: string;
+  quote: string;
+  strategy: ReturnType<typeof useBot.getState>["strategy"];
+  snapshot: LeefSnapshot;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: number;
+  expectedOut: number;
+  sizeUsd: number;
+  latencyMs: number;
+  route?: SwapRoute;
+  predEdgePct?: number;
+  poolIds?: number[];
+  hops?: number;
+  venues?: string[];
+  context?: { regime: string; volPct: number; dangerScore: number };
+};
+
+/**
+ * A signer timeout throws before the ordinary execution branch can append its
+ * journal row. Capture the exact code-generated candidate here so the normal
+ * read-only recovery can reconcile transfers, position state and the journal.
+ * The capital lock is never released from the signer layer.
+ */
+function retainUnknownBroadcast(input: UnknownBroadcastExecution): boolean {
+  const txid = pendingTxid();
+  if (!txid) return false;
+
+  // The signer may already have marked this tx UNKNOWN, or the wallet may have
+  // returned a txid and a later confirmation read failed. Normalize both cases.
+  markUnknown(txid);
+  if (pendingTxid() !== txid) return false;
+
+  const bot = useBot.getState();
+  const reason =
+    `${input.action.toUpperCase()} broadcast ${txid.slice(0, 10)}… is unresolved — ` +
+    "waiting for verified on-chain transfer settlement; capital remains locked";
+  journal({
+    kind: "execution",
+    action: input.action,
+    strategy: input.strategy,
+    mode: "live",
+    tokenIn: input.tokenIn,
+    tokenOut: input.tokenOut,
+    amountIn: input.amountIn,
+    expectedOut: input.expectedOut,
+    txid,
+    status: "unknown",
+    sizeUsd: input.sizeUsd,
+    predEdgePct: input.predEdgePct,
+    latencyMs: input.latencyMs,
+    ...(input.route
+      ? routeJournalMeta(
+          input.route,
+          input.amountIn,
+          input.amountIn > 0 ? input.sizeUsd / input.amountIn : 0,
+        )
+      : {}),
+    ...(input.poolIds ? { poolIds: input.poolIds } : {}),
+    ...(input.hops != null ? { hops: input.hops } : {}),
+    ...(input.venues ? { venues: input.venues } : {}),
+    ...(input.context ?? {}),
+    leefUsd: input.snapshot.leefUsd,
+    waxUsd: input.snapshot.waxUsd,
+  });
+  bot.markTrade(adaptiveCooldownSec(bot.risk.cooldownSec, bot.strategy, bot.stats.lastPnlUsd));
+  bot.clearRejectionStreak();
+  bot.setLastReason(reason);
+  bot.pushDecision({
+    kind: "hold",
+    mode: "live",
+    reason,
+    priceUsd: input.snapshot.leefUsd,
+    txid,
+  });
+  void pollUnknown(txid, {
+    snapshot: input.snapshot,
+    account: input.account,
+    base: input.base,
+    quote: input.quote,
+    strategy: input.strategy,
+  });
+  return true;
+}
+
+const unknownJournalRestoreInFlight = new Set<string>();
+
+/**
+ * Restore a missing execution row from the exact non-secret candidate saved
+ * in the live lock. journalAll flushes its write buffer before reading, so
+ * successful return proves one unique row exists for pollUnknown/settlement.
+ */
+async function ensureUnknownExecutionJournal(
+  txid: string,
+  intent: BotTradeIntent | undefined,
+): Promise<boolean> {
+  const desiredStatus = intent?.stateApplied ? "confirmed" : "unknown";
+  const matches = (await journalAll()).filter(
+    (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+  );
+  if (matches.length === 1) return matches[0]?.status === desiredStatus;
+  if (matches.length !== 0 || !intent) return false;
+
+  journal({
+    kind: "execution",
+    action: intent.action,
+    strategy: intent.strategy,
+    mode: "live",
+    tokenIn: intent.tokenIn,
+    tokenOut: intent.tokenOut,
+    amountIn: intent.amountIn,
+    expectedOut: intent.expectedOut,
+    txid,
+    status: desiredStatus,
+    sizeUsd: intent.sizeUsd,
+    predEdgePct: intent.predEdgePct,
+    poolIds: intent.poolIds,
+    hops: intent.hops,
+    venues: intent.venues,
+    leefUsd: intent.leefUsd,
+    waxUsd: intent.waxUsd,
+    reason: intent.stateApplied
+      ? "Restored confirmed execution metadata; bot position/statistics were already persisted before reload"
+      : "Restored unresolved execution metadata from the persisted bot signing intent after reload",
+  });
+
+  const restored = (await journalAll()).filter(
+    (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
+  );
+  return restored.length === 1 && restored[0]?.status === desiredStatus;
+}
+
 /** Resume a persisted UNKNOWN transaction automatically after app reload. */
 export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string): void {
   const txid = pendingTxid();
-  if (!txid || !account || !useWallet.getState().canSign()) return;
+  if (!txid || !account || !useWallet.getState().canSign() || unknownJournalRestoreInFlight.has(txid)) return;
+  const lockedAccount = tradeAccount();
+  if (lockedAccount && lockedAccount !== account) {
+    useBot.getState().setLastReason(
+      `Recovery belongs to ${lockedAccount}; reconnect that account before inspecting transaction settlement`,
+    );
+    return;
+  }
+  unknownJournalRestoreInFlight.add(txid);
+  const intent = persistedTradeIntent();
   const bot = useBot.getState();
-  pollUnknown(txid, {
+  const context = {
     snapshot: snap,
     account,
-    base: bot.base || "LEEF",
-    quote: bot.quote || "WAX",
-    strategy: bot.strategy,
-  });
+    base: intent?.base || bot.base || "LEEF",
+    quote: intent?.quote || bot.quote || "WAX",
+    strategy: intent?.strategy as typeof bot.strategy | undefined ?? bot.strategy,
+  };
+  void ensureUnknownExecutionJournal(txid, intent)
+    .then((journalReady) => {
+      if (!journalReady) {
+        bot.setLastReason(
+          `Recovery for ${txid.slice(0, 10)}… is paused because no unique live execution record or valid persisted trade intent exists. Capital remains locked for review.`,
+        );
+        return;
+      }
+      if (intent?.stateApplied) {
+        // The exact transfer was validated and bot state persisted before the
+        // crash. The unique confirmed journal row is now restored; do not add
+        // the same fill to the position a second time.
+        markConfirmed(txid);
+        bot.setLastReason(
+          `Recovered final settlement for ${txid.slice(0, 10)}…; bot state and confirmed journal row were already applied. Live capital is released.`,
+        );
+        return;
+      }
+      // Otherwise, the fill may have landed before bot state was updated. The
+      // read-only recovery validates transfers and applies the position once.
+      pollUnknown(txid, context);
+    })
+    .catch((error) => {
+      bot.setLastReason(
+        `Could not restore the unresolved execution record for ${txid.slice(0, 10)}…: ${error instanceof Error ? error.message : "journal unavailable"}. Capital remains locked.`,
+      );
+    })
+    .finally(() => unknownJournalRestoreInFlight.delete(txid));
 }
 
 /**
@@ -1927,11 +2147,27 @@ async function runBotOnceInner(
           b.setLastReason(reason);
           return { kind: "hold", reason };
         }
-        if (!beginSigning()) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "buy",
+          tokenIn: quoteTok,
+          tokenOut: baseTok,
+          amountIn: decision.amountIn,
+          expectedOut: decision.route.amountOut,
+          sizeUsd: decision.amountIn * bounds.quoteUsd,
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          ...(decision.edge?.netEdgePct != null ? { predEdgePct: decision.edge.netEdgePct } : {}),
+          ...routeIntentMeta(decision.route),
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         const tSign = Date.now();
         try {
           const exec = await signAndPushSwap({
             account: w.account,
+            capitalManaged: true,
             permission: w.permission,
             route: decision.route,
             amountIn: decision.amountIn,
@@ -1949,7 +2185,7 @@ async function runBotOnceInner(
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           timings.confirmationMs = Date.now() - tConf;
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -1963,7 +2199,6 @@ async function runBotOnceInner(
               quoteSpent = -spent;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed();
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
@@ -1975,6 +2210,23 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "buy",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: quoteTok,
+            tokenOut: baseTok,
+            amountIn: decision.amountIn,
+            expectedOut: decision.route.amountOut,
+            sizeUsd: decision.amountIn * bounds.quoteUsd,
+            latencyMs: Date.now() - cycleT0,
+            route: decision.route,
+            predEdgePct: decision.edge?.netEdgePct,
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2051,6 +2303,13 @@ async function runBotOnceInner(
         priceUsd: snap.leefUsd,
         txid,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "BUY fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "buy", strategy: b.strategy, mode,
         tokenIn: quoteTok, tokenOut: baseTok,
@@ -2066,6 +2325,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "buy");
+        if (!released) {
+          const reason = "BUY transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
@@ -2107,11 +2375,27 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       const t0 = Date.now();
       if (live) {
-        if (!beginSigning()) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "sell",
+          tokenIn: baseTok,
+          tokenOut: quoteTok,
+          amountIn: decision.amountLeef,
+          expectedOut: decision.route.amountOut,
+          sizeUsd: decision.amountLeef * (usdPriceOf(baseTok, book) || book.leefUsd),
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          ...(position?.predEdgePct != null ? { predEdgePct: position.predEdgePct } : {}),
+          ...routeIntentMeta(decision.route),
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         const tSign = Date.now();
         try {
           const exec = await signAndPushSwap({
             account: w.account,
+            capitalManaged: true,
             permission: w.permission,
             route: decision.route,
             amountIn: decision.amountLeef,
@@ -2128,7 +2412,7 @@ async function runBotOnceInner(
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           timings.confirmationMs = Date.now() - tConf;
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2140,7 +2424,6 @@ async function runBotOnceInner(
               quoteOut = actualOut;
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed();
             } else {
               markUnknown(txid);
               note = " · transfer details do not match the expected token pair";
@@ -2152,6 +2435,23 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "sell",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: baseTok,
+            tokenOut: quoteTok,
+            amountIn: decision.amountLeef,
+            expectedOut: decision.route.amountOut,
+            sizeUsd: decision.amountLeef * (usdPriceOf(baseTok, book) || book.leefUsd),
+            latencyMs: Date.now() - t0,
+            route: decision.route,
+            predEdgePct: position?.predEdgePct,
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2200,6 +2500,13 @@ async function runBotOnceInner(
         txid,
         pnlUsd,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "SELL fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "sell", strategy: position?.strategy ?? b.strategy, mode,
         tokenIn: b.base || "LEEF", tokenOut: b.quote || "WAX",
@@ -2223,6 +2530,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "sell");
+        if (!released) {
+          const reason = "SELL transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
@@ -2263,10 +2579,28 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       const tExec = Date.now();
       if (live) {
-        if (!beginSigning()) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "swap",
+          tokenIn: decision.tokenIn,
+          tokenOut: decision.tokenOut,
+          amountIn: decision.amountIn,
+          expectedOut: decision.route.amountOut,
+          sizeUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, book) || 0),
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          ...(decision.opportunity?.expectedNetEdgePct != null
+            ? { predEdgePct: decision.opportunity.expectedNetEdgePct }
+            : {}),
+          ...routeIntentMeta(decision.route),
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         try {
           const exec = await signAndPushSwap({
             account: w.account,
+            capitalManaged: true,
             permission: w.permission,
             route: decision.route,
             amountIn: decision.amountIn,
@@ -2280,7 +2614,7 @@ async function runBotOnceInner(
           if (exec.expectedOut > 0) outAmt = exec.expectedOut;
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2290,7 +2624,6 @@ async function runBotOnceInner(
             const actualOut = assetDelta(rec.transfers, w.account, outMeta.symbol, outMeta.contract);
             if (actualIn < 0 && actualOut > 0) {
               outAmt = actualOut;
-              markConfirmed();
               note = " · confirmed on-chain";
               execStatus = "confirmed";
             } else {
@@ -2304,6 +2637,23 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "swap",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: decision.tokenIn,
+            tokenOut: decision.tokenOut,
+            amountIn: decision.amountIn,
+            expectedOut: decision.route.amountOut,
+            sizeUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, book) || 0),
+            latencyMs: Date.now() - tExec,
+            route: decision.route,
+            predEdgePct: decision.opportunity?.expectedNetEdgePct,
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2345,6 +2695,13 @@ async function runBotOnceInner(
         txid,
         pnlUsd: tapePnl,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "SWAP fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "swap", strategy: b.strategy, mode,
         tokenIn: decision.tokenIn, tokenOut: decision.tokenOut,
@@ -2364,6 +2721,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: book.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "swap");
+        if (!released) {
+          const reason = "SWAP transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(
           book,
@@ -2468,11 +2834,29 @@ async function runBotOnceInner(
       let realizedQuote: number | null = null;
       const t0 = Date.now();
       if (live) {
-        if (!beginSigning()) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "arb",
+          tokenIn: qSym,
+          tokenOut: qSym,
+          amountIn: plan.quoteIn,
+          expectedOut: plan.quoteOut,
+          sizeUsd: plan.quoteIn * quoteMarkUsd,
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          predEdgePct: plan.profitPct * 100,
+          poolIds: [plan.buyPool.id, plan.sellPool.id],
+          hops: 2,
+          venues: ["alcor"],
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         const tSign = Date.now();
         try {
           const res = await signAndPushArb({
             account: w.account,
+            capitalManaged: true,
             permission: w.permission,
             plan,
             minProfitPct: floorPct,
@@ -2487,7 +2871,7 @@ async function runBotOnceInner(
           const rec = await waitForTransaction(txid, { budgetMs: 1_200, attempts: 3, delayMs: 200 });
           timings.confirmationMs = Date.now() - tConf;
           if (rec.status === "failed") {
-            markFailed();
+            markFailed(txid);
             throw new Error(rec.error);
           }
           if (rec.status === "confirmed") {
@@ -2497,7 +2881,6 @@ async function runBotOnceInner(
               realizedQuote = assetDelta(rec.transfers, w.account, qSym, qContract);
               note = " · confirmed on-chain";
               execStatus = "confirmed";
-              markConfirmed();
             } else {
               markUnknown(txid);
               note = " · quote-token transfers are incomplete";
@@ -2509,6 +2892,25 @@ async function runBotOnceInner(
             void pollUnknown(txid, { snapshot: book, account: w.account, base: b.base || "LEEF", quote: b.quote || "WAX", strategy: b.strategy });
           }
         } catch (err) {
+          if (live && pendingTxid() && retainUnknownBroadcast({
+            action: "arb",
+            account: w.account,
+            base: b.base || "LEEF",
+            quote: b.quote || "WAX",
+            strategy: b.strategy,
+            snapshot: book,
+            tokenIn: qSym,
+            tokenOut: qSym,
+            amountIn: plan.quoteIn,
+            expectedOut: plan.quoteOut,
+            sizeUsd: plan.quoteIn * quoteMarkUsd,
+            latencyMs: Date.now() - t0,
+            predEdgePct: plan.profitPct * 100,
+            poolIds: [plan.buyPool.id, plan.sellPool.id],
+            hops: 2,
+            venues: ["alcor"],
+            context: ctxOf(),
+          })) return decision;
           abortSigning();
           throw err;
         }
@@ -2561,6 +2963,13 @@ async function runBotOnceInner(
         txid,
         pnlUsd,
       });
+      if (live && execStatus === "confirmed" && txid && !markTradeStateApplied(txid)) {
+        markUnknown(txid);
+        const reason = "ARB fill is confirmed, but the persisted recovery marker could not be saved. Live capital remains locked.";
+        b.setLastReason(reason);
+        b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+        return { kind: "hold", reason };
+      }
       journal({
         kind: "execution", action: "arb", strategy: b.strategy, mode,
         tokenIn: qSym, tokenOut: qSym,
@@ -2581,6 +2990,15 @@ async function runBotOnceInner(
         ...ctxOf(),
         leefUsd: snap.leefUsd, waxUsd: snap.waxUsd,
       });
+      if (live && execStatus === "confirmed" && txid) {
+        const released = await releaseBotCapitalAfterJournal(txid, "arb");
+        if (!released) {
+          const reason = "ARB transfers are confirmed, but its execution journal row is not durable. Live capital remains locked for recovery.";
+          b.setLastReason(reason);
+          b.pushDecision({ kind: "hold", mode: "live", reason, priceUsd: snap.leefUsd, txid });
+          return { kind: "hold", reason };
+        }
+      }
       if (live && execStatus === "confirmed") {
         noteSelfImpact(book, plan.buyPool.id, "arb", plan.quoteIn * quoteMarkUsd, qSym, qSym);
       }

@@ -74,11 +74,112 @@ export const emptyTimings = (): CycleTimings => ({
   rejectedCandidates: 0,
 });
 
+export type BotTradeIntent = {
+  action: "buy" | "sell" | "swap" | "arb";
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: number;
+  expectedOut: number;
+  sizeUsd: number;
+  strategy: string;
+  base: string;
+  quote: string;
+  leefUsd: number;
+  waxUsd: number;
+  predEdgePct?: number;
+  poolIds?: number[];
+  hops?: number;
+  venues?: string[];
+  /** True only after the deterministic bot state updates were persisted for this fill. */
+  stateApplied?: boolean;
+};
+
 type Lock = {
   phase: TradePhase;
   txid?: string;
+  account?: string;
+  intent?: BotTradeIntent;
   since: number;
+  /** Why a txid-less blocked lock exists; corrupt storage is never user-clearable. */
+  blockedCause?: "interrupted-signing" | "corrupt-storage";
 };
+
+function validText(value: unknown, maxLength = 128): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+}
+
+/** Accept only the small, non-secret candidate fields needed for safe reload recovery. */
+function normalizeTradeIntent(value: unknown): BotTradeIntent | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  if (
+    (v.action !== "buy" && v.action !== "sell" && v.action !== "swap" && v.action !== "arb") ||
+    !validText(v.tokenIn, 128) ||
+    !validText(v.tokenOut, 128) ||
+    !validText(v.strategy, 64) ||
+    !validText(v.base, 64) ||
+    !validText(v.quote, 64)
+  ) return undefined;
+
+  const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  if (
+    !finite(v.amountIn) || v.amountIn <= 0 ||
+    !finite(v.expectedOut) || v.expectedOut <= 0 ||
+    !finite(v.sizeUsd) || v.sizeUsd < 0 ||
+    !finite(v.leefUsd) || v.leefUsd < 0 ||
+    !finite(v.waxUsd) || v.waxUsd < 0
+  ) return undefined;
+
+  const intent: BotTradeIntent = {
+    action: v.action,
+    tokenIn: v.tokenIn.trim(),
+    tokenOut: v.tokenOut.trim(),
+    amountIn: v.amountIn,
+    expectedOut: v.expectedOut,
+    sizeUsd: v.sizeUsd,
+    strategy: v.strategy.trim(),
+    base: v.base.trim(),
+    quote: v.quote.trim(),
+    leefUsd: v.leefUsd,
+    waxUsd: v.waxUsd,
+  };
+  if (v.stateApplied !== undefined) {
+    if (typeof v.stateApplied !== "boolean") return undefined;
+    intent.stateApplied = v.stateApplied;
+  }
+  if (v.predEdgePct !== undefined) {
+    if (!finite(v.predEdgePct)) return undefined;
+    intent.predEdgePct = v.predEdgePct;
+  }
+  if (v.poolIds !== undefined) {
+    if (
+      !Array.isArray(v.poolIds) ||
+      v.poolIds.length > 16 ||
+      !v.poolIds.every((id) => Number.isInteger(id) && (id as number) >= 0)
+    ) return undefined;
+    intent.poolIds = [...v.poolIds] as number[];
+  }
+  if (v.hops !== undefined) {
+    if (!Number.isInteger(v.hops) || (v.hops as number) < 1 || (v.hops as number) > 10) {
+      return undefined;
+    }
+    intent.hops = v.hops as number;
+  }
+  if (v.venues !== undefined) {
+    if (
+      !Array.isArray(v.venues) ||
+      v.venues.length > 16 ||
+      !v.venues.every((venue) => validText(venue, 64))
+    ) return undefined;
+    intent.venues = v.venues.map((venue) => (venue as string).trim());
+  }
+  return intent;
+}
+
+function savedIntent(saved: Partial<Lock>): Pick<Lock, "intent"> {
+  const intent = normalizeTradeIntent(saved.intent);
+  return intent ? { intent } : {};
+}
 
 export const TRADE_CYCLE_STORAGE_KEY = "leef-live-capital-lock-v1";
 
@@ -89,16 +190,31 @@ function readSavedLock(): Lock {
     if (!raw) return { phase: "idle", since: 0 };
     const saved = JSON.parse(raw) as Partial<Lock>;
     if (!Number.isFinite(saved.since) || typeof saved.since !== "number") {
-      return { phase: "blocked", since: Date.now() };
+      return { phase: "blocked", since: Date.now(), blockedCause: "corrupt-storage" };
     }
     if (typeof saved.txid === "string" && /^[a-f0-9]{64}$/i.test(saved.txid)) {
-      return { phase: "unknown", txid: saved.txid, since: saved.since };
+      return {
+        phase: "unknown",
+        txid: saved.txid,
+        ...(typeof saved.account === "string" && saved.account ? { account: saved.account } : {}),
+        ...savedIntent(saved),
+        since: saved.since,
+      };
     }
-    // A reload during signing may have happened after broadcast but before
-    // the wallet returned its txid. Block new capital use until reviewed.
-    return { phase: "blocked", since: saved.since };
+    // Preserve a corrupt-storage quarantine across reloads. Older, valid
+    // txid-less signing records are treated as interrupted wallet prompts.
+    const blockedCause = saved.blockedCause === "corrupt-storage"
+      ? "corrupt-storage"
+      : "interrupted-signing";
+    return {
+      phase: "blocked",
+      ...(typeof saved.account === "string" && saved.account ? { account: saved.account } : {}),
+      ...savedIntent(saved),
+      since: saved.since,
+      blockedCause,
+    };
   } catch {
-    return { phase: "blocked", since: Date.now() };
+    return { phase: "blocked", since: Date.now(), blockedCause: "corrupt-storage" };
   }
 }
 
@@ -135,6 +251,40 @@ export function pendingTxid(): string | undefined {
   return lock.txid;
 }
 
+/** Time the current/last live signing attempt began, for recovery review. */
+export function tradeStartedAt(): number {
+  return lock.since;
+}
+
+/** Account associated with the pending live signing attempt, when saved. */
+export function tradeAccount(): string | undefined {
+  return lock.account;
+}
+
+/** Non-secret candidate metadata persisted for safe read-only recovery after reload. */
+export function tradeIntent(): BotTradeIntent | undefined {
+  return lock.intent;
+}
+
+/**
+ * Persist that the bot's position/statistics mutation already reflects this
+ * exact confirmed txid. Reload recovery then finishes Journal/lock settlement
+ * without applying the same fill to bot state a second time.
+ */
+export function markTradeStateApplied(txid: string): boolean {
+  if (
+    lock.txid !== txid ||
+    (lock.phase !== "broadcasted" && lock.phase !== "reconciling" && lock.phase !== "unknown") ||
+    !lock.intent
+  ) return false;
+  lock = {
+    ...lock,
+    intent: { ...lock.intent, stateApplied: true },
+  };
+  persistLock(lock);
+  return true;
+}
+
 /** True when a new LIVE transaction must not be submitted. */
 export function liveCapitalBlocked(): boolean {
   return (
@@ -146,36 +296,104 @@ export function liveCapitalBlocked(): boolean {
   );
 }
 
-export function beginSigning(): boolean {
+export function beginSigning(account?: string, intent?: BotTradeIntent): boolean {
   if (liveCapitalBlocked()) return false;
-  lock = { phase: "signing", since: Date.now() };
+  const normalizedIntent = normalizeTradeIntent(intent);
+  // A bot-managed caller supplies intent; reject malformed metadata before
+  // signing rather than create a broadcast that cannot be reconstructed safely.
+  if (intent !== undefined && !normalizedIntent) return false;
+  lock = {
+    phase: "signing",
+    ...(account?.trim() ? { account: account.trim() } : {}),
+    ...(normalizedIntent ? { intent: normalizedIntent } : {}),
+    since: Date.now(),
+  };
   persistLock(lock);
   return true;
 }
 
 export function markBroadcast(txid: string): void {
-  lock = { phase: "broadcasted", txid, since: Date.now() };
+  // dispatchActions is also used by non-bot wallet screens. Only a bot cycle
+  // that acquired the signing lock may claim the shared bot capital lock.
+  if (lock.phase !== "signing" && !(lock.phase === "broadcasted" && lock.txid === txid)) return;
+  lock = {
+    phase: "broadcasted",
+    txid,
+    ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
+    since: Date.now(),
+  };
+  persistLock(lock);
+}
+
+/** Preserve the lock when an external wallet outcome is ambiguous and gave no txid. */
+export function markInterruptedSigning(): void {
+  if (lock.phase !== "signing") return;
+  lock = {
+    phase: "blocked",
+    ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
+    since: lock.since,
+    blockedCause: "interrupted-signing",
+  };
   persistLock(lock);
 }
 
 export function markReconciling(txid: string): void {
-  lock = { phase: "reconciling", txid, since: Date.now() };
+  if (
+    lock.phase !== "broadcasted" &&
+    !(lock.phase === "reconciling" && lock.txid === txid)
+  ) return;
+  if (lock.txid && lock.txid !== txid) return;
+  lock = {
+    phase: "reconciling",
+    txid,
+    ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
+    since: Date.now(),
+  };
   persistLock(lock);
 }
 
-export function markConfirmed(): void {
+function canSettleLock(txid: string): boolean {
+  return (
+    /^[a-f0-9]{64}$/i.test(txid) &&
+    lock.txid === txid &&
+    (lock.phase === "broadcasted" || lock.phase === "reconciling" || lock.phase === "unknown")
+  );
+}
+
+/** Release only the exact live transaction whose position/journal was reconciled. */
+export function markConfirmed(txid: string): void {
+  if (!canSettleLock(txid)) return;
   lock = { phase: "idle", since: Date.now() };
   persistLock(lock);
 }
 
-export function markFailed(): void {
+/** Release only the exact live transaction independently confirmed failed. */
+export function markFailed(txid: string): void {
+  if (!canSettleLock(txid)) return;
   lock = { phase: "idle", since: Date.now() };
   persistLock(lock);
 }
 
 /** Capital may have moved. Do not retry. Keep the txid. */
 export function markUnknown(txid: string): void {
-  lock = { phase: "unknown", txid, since: Date.now() };
+  // Only a bot-owned signing/broadcast cycle may hold the bot capital lock.
+  // A non-bot UI action cannot create or overwrite one by using the shared signer.
+  if (
+    lock.phase !== "signing" &&
+    !(lock.phase === "broadcasted" && lock.txid === txid) &&
+    !(lock.phase === "reconciling" && lock.txid === txid) &&
+    !(lock.phase === "unknown" && lock.txid === txid)
+  ) return;
+  lock = {
+    phase: "unknown",
+    txid,
+    ...(lock.account ? { account: lock.account } : {}),
+    ...(lock.intent ? { intent: lock.intent } : {}),
+    since: Date.now(),
+  };
   persistLock(lock);
 }
 
@@ -186,9 +404,36 @@ export function abortSigning(): void {
   }
 }
 
+/**
+ * Explicit operator acknowledgement after inspecting wallet/account history.
+ * This never clears a lock with a txid, an active signing attempt, or corrupt
+ * storage. The UI must only call it after the user confirms no trade landed.
+ */
+export function canConfirmInterruptedSigningNoBroadcast(account?: string): boolean {
+  const requestedAccount = account?.trim();
+  return (
+    lock.phase === "blocked" &&
+    !lock.txid &&
+    lock.blockedCause === "interrupted-signing" &&
+    !!requestedAccount &&
+    (!lock.account || lock.account === requestedAccount)
+  );
+}
+
+export function confirmInterruptedSigningNoBroadcast(account?: string): boolean {
+  if (!canConfirmInterruptedSigningNoBroadcast(account)) {
+    return false;
+  }
+  lock = { phase: "idle", since: Date.now() };
+  persistLock(lock);
+  return true;
+}
+
 export function unknownBlockReason(): string | null {
   if (lock.phase === "blocked" && !lock.txid) {
-    return "A prior signing attempt was interrupted by reload — inspect wallet activity before submitting another trade";
+    return lock.blockedCause === "corrupt-storage"
+      ? "The saved live-trade lock is malformed — manual support review is required; do not clear it"
+      : "A prior wallet signing attempt was interrupted — inspect wallet activity before submitting another trade";
   }
   if (lock.phase !== "unknown" || !lock.txid) return null;
   return `Previous tx ${lock.txid.slice(0, 10)}… is UNKNOWN / unresolved — not submitting another trade until settlement is reconciled`;

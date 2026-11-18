@@ -61,7 +61,7 @@ import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
 import { journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
-import { liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradePhase } from "@/lib/wallet/trade-cycle";
+import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradeAccount, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
 import { assessUnknownExecution } from "@/lib/wallet/recovery";
 import { metaOf } from "@/lib/wallet/tokens";
@@ -111,19 +111,29 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryResult, setRecoveryResult] = useState<ReconcileResult | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [confirmNoBroadcast, setConfirmNoBroadcast] = useState(false);
   const unresolvedTxid = pendingTxid();
   const unresolvedPhase = tradePhase();
+  const interruptedAccount = tradeAccount();
+  const recoveryAccount = interruptedAccount ?? account;
+  const recoveryAccountMatches = !interruptedAccount || interruptedAccount === account;
+  const canManuallyUnlockInterrupted =
+    recoveryAccountMatches && canConfirmInterruptedSigningNoBroadcast(recoveryAccount);
   const hasRecoveryLock = liveCapitalBlocked();
 
   async function inspectPendingSettlement() {
     if (!unresolvedTxid || recoveryBusy) return;
+    if (interruptedAccount && interruptedAccount !== account) {
+      setRecoveryNotice(`This transaction belongs to ${interruptedAccount}. Switch back to that wallet before inspecting settlement.`);
+      return;
+    }
     setRecoveryBusy(true);
     setRecoveryNotice(null);
     try {
       const result = await waitForTransaction(unresolvedTxid, { attempts: 4, delayMs: 500, budgetMs: 5_000 });
       setRecoveryResult(result);
       if (result.status === "failed") {
-        markFailed();
+        markFailed(unresolvedTxid);
         setRecoveryNotice("The transaction failure was independently confirmed. The live capital lock has been released; no fill was booked.");
         return;
       }
@@ -180,7 +190,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
         setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
         return;
       }
-      markConfirmed(); // clear the guard only after state + journal reconciliation
+      markConfirmed(unresolvedTxid); // clear the guard only after state + journal reconciliation
       setRecoveryNotice("Recovered from confirmed on-chain transfers. Bot position state and the evidence journal are reconciled; the live capital lock is released. Historical P&L was not estimated.");
     } catch (error) {
       setRecoveryNotice(error instanceof Error ? error.message : "Recovery inspection failed. The live capital lock remains in place.");
@@ -334,6 +344,76 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                   ? `Transaction ${unresolvedTxid.slice(0, 12)}… is ${unresolvedPhase}. Inspect chain settlement before resuming.`
                   : "A signing attempt was interrupted before a transaction ID was saved. Check wallet activity before trading again."}
               </p>
+              {!unresolvedTxid && canManuallyUnlockInterrupted && (
+                <div className="mt-3 space-y-2 rounded-md border border-amber-500/30 bg-background/70 p-3">
+                  <p className="text-xs font-medium">
+                    Interrupted at {new Date(tradeStartedAt()).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Confirm this is the same account that was connected when signing was interrupted. Inspect its history from this time onward for any outgoing token transfer to swap.alcor or any trade you did not expect. Also make sure no Anchor/Cloud Wallet signing prompt is still pending.
+                  </p>
+                  {recoveryAccount && (
+                    <a
+                      className="inline-flex text-xs font-medium underline underline-offset-4"
+                      href={`https://wax.bloks.io/account/${encodeURIComponent(recoveryAccount)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open {recoveryAccount} on WAX explorer
+                    </a>
+                  )}
+                  {!confirmNoBroadcast ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!account || !recoveryAccountMatches}
+                      onClick={() => setConfirmNoBroadcast(true)}
+                    >
+                      I checked: no transaction was submitted
+                    </Button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-600">
+                        This releases the live capital lock. Do not continue if a trade appears in history, indexing is incomplete, or you are unsure.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setConfirmNoBroadcast(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            const released = confirmInterruptedSigningNoBroadcast(recoveryAccount);
+                            setConfirmNoBroadcast(false);
+                            setRecoveryNotice(
+                              released
+                                ? "Interrupted signing lock released after your account-history confirmation. Start with a small test clip and verify its settlement."
+                                : "The lock could not be released. It remains in place for safety.",
+                            );
+                          }}
+                        >
+                          Confirm unlock
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!unresolvedTxid && !canManuallyUnlockInterrupted && (
+                <p className="mt-2 text-xs text-amber-600">
+                  {interruptedAccount && interruptedAccount !== account
+                    ? `This lock belongs to ${interruptedAccount}. Switch back to that account before checking history; the current account is not sufficient.`
+                    : "Connect the original wallet account and inspect its history before recovery. A malformed lock record cannot be self-cleared; request a transaction-state review."}
+                </p>
+              )}
               {unresolvedTxid && (
                 <p className="mt-2 break-all rounded border border-border/60 bg-background/70 p-2 font-mono text-[11px] text-muted-foreground select-all">
                   {unresolvedTxid}
@@ -375,7 +455,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               </div>
             </div>
             {unresolvedTxid && (
-              <Button type="button" size="sm" variant="outline" disabled={recoveryBusy} onClick={() => void inspectPendingSettlement()}>
+              <Button type="button" size="sm" variant="outline" disabled={recoveryBusy || (!!interruptedAccount && interruptedAccount !== account)} onClick={() => void inspectPendingSettlement()}>
                 {recoveryBusy ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <ScanSearch className="mr-2 size-3.5" />}
                 Inspect & reconcile
               </Button>

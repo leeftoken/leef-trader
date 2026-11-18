@@ -45,11 +45,13 @@ export function capitalAvailable(): boolean {
  */
 export async function coordinateCapitalMovement<T extends { txid: string }>(opts: {
   owner: CapitalOwner;
+  account?: string;
   submit: () => Promise<T>;
   confirmation?: { budgetMs?: number; attempts?: number; delayMs?: number };
-  onSettled?: (result: ReconcileResult) => void | Promise<void>;
+  /** Return false to veto a successful transfer settlement (e.g. exact deltas mismatch). */
+  onSettled?: (result: ReconcileResult) => boolean | void | Promise<boolean | void>;
 }): Promise<CoordinatedResult<T>> {
-  if (!beginSigning()) {
+  if (!beginSigning(opts.account)) {
     throw new CapitalBusyError(
       opts.owner,
       unknownBlockReason() ?? "Another trade is signing, broadcasting, or reconciling",
@@ -68,11 +70,12 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
       delayMs: opts.confirmation?.delayMs ?? 300,
     });
     if (reconciliation.status === "confirmed") {
-      markConfirmed();
-      await opts.onSettled?.(reconciliation);
+      const accepted = await opts.onSettled?.(reconciliation);
+      if (accepted === false) markUnknown(txid);
+      else markConfirmed(txid);
     } else if (reconciliation.status === "failed") {
-      markFailed();
       await opts.onSettled?.(reconciliation);
+      markFailed(txid);
     } else {
       markUnknown(txid);
       await opts.onSettled?.(reconciliation);
@@ -84,13 +87,14 @@ export async function coordinateCapitalMovement<T extends { txid: string }>(opts
           if (pendingTxid() !== txid) return;
           const later = await reconcileTransfersLater(txid);
           if (later.status === "failed") {
-            markFailed();
             await opts.onSettled?.(later);
+            markFailed(txid);
             return;
           }
           if (later.status === "confirmed" && later.transfers.length > 0) {
-            markConfirmed();
-            await opts.onSettled?.(later);
+            const accepted = await opts.onSettled?.(later);
+            if (accepted === false) markUnknown(txid);
+            else markConfirmed(txid);
             return;
           }
           markUnknown(txid);

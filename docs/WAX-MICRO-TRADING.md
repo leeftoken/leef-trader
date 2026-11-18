@@ -4,7 +4,7 @@ LEEF Trader targets WAX/Antelope micro-liquidity books. The engine must support 
 
 ## Default WAX profile
 
-New WAX/LEEF bot sessions use the bounded WAX Micro Active profile:
+Untouched WAX/LEEF saves from bot-store v15 migrate to the bounded WAX Micro Active profile. Fresh installs retain the standard DEFAULT_RISK profile unless the user selects WAX Micro Active:
 
 - 10-second book polling and cooldown, with a 60 execution-attempts-per-hour cap.
 - 4% directional price-impact ceiling and 0.8% slippage tolerance.
@@ -13,7 +13,7 @@ New WAX/LEEF bot sessions use the bounded WAX Micro Active profile:
 - 7.5% maximum pool-share sizing.
 - 1.5% maximum loss per volume echo, with the existing $5 session echo budget and account-level drawdown/daily-loss breakers.
 
-A saved profile is migrated only when it exactly matches the untouched previous WAX defaults. Customized risk settings are preserved. Users can still select Conservative, Balanced, Standard, or WAX Micro Active.
+A saved profile is migrated only when it exactly matches the untouched previous WAX defaults. Customized risk settings are preserved. Fresh installs do not silently receive the higher-activity profile. Users can select Conservative, Balanced, Standard, or WAX Micro Active.
 
 ## Volume selection
 
@@ -45,3 +45,15 @@ Do not rotate the signer model based on subjective chat quality alone. Benchmark
 ## Validation
 
 Run the planner and risk-profile unit tests, full typecheck/lint/test/build suite, and paper-mode replay against recorded WAX market snapshots before enabling live sessions. Measure realized net P&L, actual fees, confirmed pool volume, rejection reasons and recovery incidents separately.
+
+
+## Persisted bot migration and live-lock recovery
+
+- Bot store schema v16 is the migration boundary for untouched v15 WAX/LEEF defaults. Without the version bump, Zustand does not invoke the migration for an existing v15 save.
+- The live capital lock records the originating account and start time for each bot signing attempt.
+- The lock also carries a bounded, non-secret copy of the exact bot candidate (action, token identities, amount, pool IDs and market marks). If a reload happens after the transaction ID is persisted but before the journal row is written, recovery may reconstruct only the pending execution row from that candidate; actual position changes still require exact on-chain transfer evidence.
+- Once the exact transfer is confirmed and the bot's position/statistics updates are persisted, the lock records `stateApplied=true` before writing the execution Journal row. If a reload loses that row, recovery reconstructs a confirmed row and completes the lock without applying the same fill to the position twice.
+- Anchor/Cloud Wallet performs signing and broadcast outside the app. A definitive user cancellation releases the in-flight signing lock; an ambiguous wallet error with no transaction ID remains blocked.
+- A txid-less interrupted lock can only be released through the Bot Desk's two-step operator acknowledgement after checking the **same WAX account's** activity from the recorded start time. A lock with a txid still requires transaction reconciliation; malformed lock storage is never self-clearable.
+- A session-key broadcast timeout records the known transaction ID but never unlocks inside the signer. The bot loop first appends the exact unresolved execution, then read-only recovery verifies the transfers, applies the position update idempotently, settles the journal, and only then releases live capital.
+- The recovery acknowledgement is an explicit user attestation, not an automated proof that no transaction landed. When history is incomplete or ambiguous, keep the lock and escalate for transaction-state review.

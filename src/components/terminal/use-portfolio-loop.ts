@@ -406,12 +406,14 @@ export async function runRebalancer(snap: LeefSnapshot, opts?: { force?: boolean
       try {
         const coordinated = await coordinateCapitalMovement({
           owner: "rebalancer",
+          account: w.account,
           submit: () =>
             signAndPushBatch({
               account: w.account,
               permission: w.permission,
               legs: allLegs,
               snap,
+              capitalManaged: true,
             }),
           onSettled: async (result) => {
             if (result.status === "confirmed") await syncWalletBalances(snap);

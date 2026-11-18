@@ -74,6 +74,25 @@ describe("live capital lock", () => {
     expect(liveCapitalBlocked()).toBe(true);
   });
 
+
+  it("does not create a bot capital lock for a wallet action outside a bot signing cycle", () => {
+    markBroadcast("d".repeat(64));
+
+    expect(tradePhase()).toBe("idle");
+    expect(liveCapitalBlocked()).toBe(false);
+  });
+
+  it("does not allow user acknowledgement to clear corrupt persisted lock data", () => {
+    localStorage.setItem(
+      TRADE_CYCLE_STORAGE_KEY,
+      JSON.stringify({ phase: "blocked", since: 123, blockedCause: "corrupt-storage" }),
+    );
+
+    expect(restoreTradeCycleLock()).toBe("blocked");
+    expect(confirmInterruptedSigningNoBroadcast()).toBe(false);
+    expect(liveCapitalBlocked()).toBe(true);
+  });
+
   it("clears persisted lock only after an explicit confirmed or failed outcome", () => {
     expect(beginSigning()).toBe(true);
     markBroadcast("b".repeat(64));

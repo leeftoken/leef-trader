@@ -192,7 +192,7 @@ export function Quotes({
                   </Badge>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <div className="h-12 min-w-0 flex-1 overflow-x-auto font-mono text-xl font-medium tabular-nums text-leef sm:text-2xl">
                   {active ? fmtNum(active.amountOut, { compact: true }) : "0.00"}
                 </div>

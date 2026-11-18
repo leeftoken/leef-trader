@@ -795,11 +795,26 @@ export function findBestArb(
   const floor = Math.max(0, minIn);
   let best: ArbPlan | null = null;
   const span = maxIn - floor;
-  const points = span < floor * 0.02 ? [floor, maxIn] : [0, 0.2, 0.35, 0.6, 1].map((f) => floor + span * f);
-  for (const size of points) {
-    const plan = findArb(snap, size, minProfitPct, allowSamePool, freshIds, quote, base);
+  const tiny = span < floor * 0.02;
+  const coarse = tiny ? [0, 1] : [0, 0.2, 0.35, 0.6, 1];
+  let bestFrac = 0;
+  for (let i = 0; i < coarse.length; i++) {
+    const plan = findArb(snap, floor + span * coarse[i]!, minProfitPct, allowSamePool, freshIds, quote, base);
     if (!plan) continue;
-    if (!best || plan.quoteOut - plan.quoteIn > best.quoteOut - best.quoteIn) best = plan;
+    if (!best || plan.quoteOut - plan.quoteIn > best.quoteOut - best.quoteIn) {
+      best = plan;
+      bestFrac = coarse[i]!;
+    }
+  }
+  if (!best || tiny) return best;
+  // AMM profit-vs-size curves peak between the coarse scan points: probe the
+  // winner's neighbourhood. The probed set is a superset of the old ladder,
+  // so the result can only ever improve on it.
+  for (const dF of [-0.1, -0.05, 0.05, 0.1]) {
+    const f = bestFrac + dF;
+    if (f < 0 || f > 1) continue;
+    const plan = findArb(snap, floor + span * f, minProfitPct, allowSamePool, freshIds, quote, base);
+    if (plan && plan.quoteOut - plan.quoteIn > best.quoteOut - best.quoteIn) best = plan;
   }
   return best;
 }

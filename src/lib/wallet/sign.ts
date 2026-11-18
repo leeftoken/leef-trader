@@ -308,6 +308,8 @@ async function dispatchActions(opts: {
   permission: string;
   actions: ActionSpec[];
   policy?: PolicyContext;
+  /** This transaction is owned by the bot loop and participates in its capital lock. */
+  botManaged?: boolean;
   /** Pre-broadcast compute_transaction simulation (session-key path). Default "auto". */
   simulate?: SimulationMode;
 }): Promise<{ txid: string }> {
@@ -342,7 +344,7 @@ async function dispatchActions(opts: {
       if (/user (?:rejected|cancelled|canceled|declined|denied)|(?:rejected|cancelled|canceled|declined) by (?:the )?user/i.test(message)) {
         throw new TradeError("SIGNING_FAILURE", message);
       }
-      markInterruptedSigning();
+      if (opts.botManaged) markInterruptedSigning();
       throw new TradeError(
         "TRANSACTION_UNKNOWN",
         `External wallet returned no definitive transaction result. Inspect account history before another live trade. ${message}`,
@@ -361,7 +363,7 @@ async function dispatchActions(opts: {
     }
     // Persist as soon as the wallet returns the id, before control returns to
     // the bot loop. This closes the response→caller reload window.
-    markBroadcast(txid);
+    if (opts.botManaged) markBroadcast(txid);
     return { txid };
   }
 
@@ -421,7 +423,7 @@ async function dispatchActions(opts: {
       // Only the bot loop can reconcile chain evidence AND update its saved
       // position + execution journal before releasing the capital lock.
       // NEVER re-sign, NEVER re-broadcast, NEVER duplicate-spend.
-      markUnknown(txid);
+      if (opts.botManaged) markUnknown(txid);
       throw new TradeError(
         "TRANSACTION_UNKNOWN",
         `Broadcast timed out — tracking tx ${txid} on-chain; not resubmitting`,
@@ -445,6 +447,7 @@ async function signAndPushTransfers(opts: {
   permission: string;
   transfers: { contract: string; data: TransferActionData }[];
   policy?: PolicyContext;
+  botManaged?: boolean;
 }): Promise<{ txid: string }> {
   // Wallet sessions sign as the wallet's own actor — normalize `from` to it.
   const sess = walletSession();
@@ -456,6 +459,7 @@ async function signAndPushTransfers(opts: {
       transferSpec(t.contract, { ...t.data, from }),
     ),
     policy: opts.policy,
+    botManaged: opts.botManaged,
   });
 }
 
@@ -481,6 +485,8 @@ export async function signAndPushSwap(opts: {
   onchainCheck?: OnchainCheckMode;
   /** Price-impact allowance used by the cross-check's lower band, percent (default 5). */
   maxImpactPct?: number;
+  /** True only when called by the deterministic bot execution loop. */
+  botManaged?: boolean;
 }): Promise<SwapExecution> {
   const { transfers, expectedOut, guaranteedOut } = await buildTransfers(opts);
   // Platform fee: once, on the guaranteed output, inside the same atomic
@@ -538,6 +544,7 @@ export async function signAndPushSwap(opts: {
         : undefined,
       swapFloor,
     },
+    botManaged: opts.botManaged,
   });
   return {
     txid,
@@ -737,6 +744,8 @@ export async function signAndPushArb(opts: {
   /** Hard profit floor the sell legs must enforce on-chain, percent. */
   minProfitPct: number;
   snap: LeefSnapshot;
+  /** True only when called by the deterministic bot execution loop. */
+  botManaged?: boolean;
 }): Promise<{
   txid: string;
   /** The platform fee appended to this transaction (absent when it floors to 0). */
@@ -818,6 +827,7 @@ export async function signAndPushArb(opts: {
       snap: opts.snap,
       platformFee: fee ? { maxByKey: { [`${quoteTok.symbol.toUpperCase()}@${quoteTok.contract}`]: fee.amount } } : undefined,
     },
+    botManaged: opts.botManaged,
   });
   return {
     txid,

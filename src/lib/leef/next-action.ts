@@ -157,6 +157,21 @@ export type TapeClip = {
   netUsd: number;
   netPct: number;
 };
+ 
+/**
+ * Profit-first selection for a volume clip.
+ * Prefer the highest net dollar outcome; if every viable route loses, choose
+ * the least-negative result rather than maximising the size of the loss.
+ * Notional is only a tie-break, so volume never outranks economics.
+ */
+export function selectBestTapeClip(clips: TapeClip[]): TapeClip | null {
+  if (clips.length === 0) return null;
+  return [...clips].sort((a, b) => {
+    const netDelta = b.netUsd - a.netUsd;
+    if (Math.abs(netDelta) > 1e-12) return netDelta;
+    return b.usdIn - a.usdIn;
+  })[0] ?? null;
+}
 
 /**
  * Volume tape: any held token → base (or base → quote) at a mixed size
@@ -258,12 +273,5 @@ export function planLeefTape(
     }
   }
 
-  if (clips.length === 0) return null;
-  clips.sort((a, b) => {
-    const ap = a.netUsd >= 0 ? 1 : 0;
-    const bp = b.netUsd >= 0 ? 1 : 0;
-    if (ap !== bp) return bp - ap;
-    return b.usdIn - a.usdIn;
-  });
-  return clips[0] ?? null;
+  return selectBestTapeClip(clips);
 }

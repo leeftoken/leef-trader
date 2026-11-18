@@ -1,4 +1,4 @@
-import { journal, journalAll } from "@/lib/leef/journal";
+import { executionForRecovery, journal, journalAll } from "@/lib/leef/journal";
 import type { BotTradeIntent } from "@/lib/wallet/trade-cycle";
 
 export type UnknownExecutionJournalOptions = {
@@ -30,6 +30,14 @@ export async function ensureUnknownExecutionJournal(
   if (matches.length === 1) {
     const status = matches[0]?.status;
     return status === desiredStatus || (!!intent?.stateApplied && status === "confirmed");
+  }
+  if (matches.length > 1) {
+    const recoverable = executionForRecovery(matches);
+    return !!recoverable && (
+      recoverable.status === "unknown" ||
+      !!intent?.stateApplied ||
+      recoverable.reconciledAt != null
+    );
   }
   if (matches.length !== 0 || !intent) return false;
 

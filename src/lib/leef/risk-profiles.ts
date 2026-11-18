@@ -27,3 +27,28 @@ export const WAX_MICRO_ACTIVE_RISK: BotRisk = {
   maxHops: 4,
   maxPoolSharePct: 7.5,
 };
+
+
+/**
+ * Only upgrade the exact pre-WAX-micro product defaults. Any user who changed
+ * a risk knob keeps their own profile; this is not a blanket risk reset.
+ */
+export function shouldUpgradeLegacyWaxDefaults(risk: Partial<BotRisk> | undefined): boolean {
+  if (!risk) return false;
+  const legacyDefaults: Partial<BotRisk> = {
+    maxImpactPct: 3,
+    cooldownSec: 30,
+    maxTradesHour: 20,
+    slippage: 0.6,
+    minConfidence: 65,
+    minEdgePct: 0.45,
+    maxEchoLossPct: 1.5,
+    volumeFlowGateMin: 0,
+    echoBudgetUsd: 5,
+    minNetEdgePct: 0,
+    maxQuoteAgeSec: 45,
+    maxHops: 4,
+    maxPoolSharePct: 5,
+  };
+  return Object.entries(legacyDefaults).every(([key, value]) => risk[key as keyof BotRisk] === value);
+}

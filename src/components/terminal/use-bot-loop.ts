@@ -80,6 +80,8 @@ import {
   markUnknown,
   pendingTxid,
   tradeAccount,
+  tradeIntent as persistedTradeIntent,
+  type BotTradeIntent,
   recordCycleTimings,
   unknownBlockReason,
 } from "@/lib/wallet/trade-cycle";
@@ -501,6 +503,15 @@ function routeJournalMeta(route: SwapRoute, amountIn: number, pxIn: number) {
     sizeUsd: amountIn * Math.max(0, pxIn),
   };
 }
+
+function routeIntentMeta(route: SwapRoute): Pick<BotTradeIntent, "poolIds" | "hops" | "venues"> {
+  return {
+    poolIds: [...route.poolIds],
+    hops: route.legs.length,
+    venues: [...new Set(route.legs.map((leg) => leg.venue ?? "alcor"))],
+  };
+}
+
 
 /**
  * Capture a route-scoped market fixture (Phase 3 market memory): just the
@@ -2023,7 +2034,22 @@ async function runBotOnceInner(
           b.setLastReason(reason);
           return { kind: "hold", reason };
         }
-        if (!beginSigning(w.account)) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "buy",
+          tokenIn: quoteTok,
+          tokenOut: baseTok,
+          amountIn: decision.amountIn,
+          expectedOut: decision.route.amountOut,
+          sizeUsd: decision.amountIn * bounds.quoteUsd,
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          ...(decision.edge?.netEdgePct != null ? { predEdgePct: decision.edge.netEdgePct } : {}),
+          ...routeIntentMeta(decision.route),
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         const tSign = Date.now();
         try {
           const exec = await signAndPushSwap({
@@ -2221,7 +2247,22 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       const t0 = Date.now();
       if (live) {
-        if (!beginSigning(w.account)) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "sell",
+          tokenIn: baseTok,
+          tokenOut: quoteTok,
+          amountIn: decision.amountLeef,
+          expectedOut: decision.route.amountOut,
+          sizeUsd: decision.amountLeef * (usdPriceOf(baseTok, book) || book.leefUsd),
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          ...(position?.predEdgePct != null ? { predEdgePct: position.predEdgePct } : {}),
+          ...routeIntentMeta(decision.route),
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         const tSign = Date.now();
         try {
           const exec = await signAndPushSwap({
@@ -2395,7 +2436,24 @@ async function runBotOnceInner(
       let execStatus: "confirmed" | "included" | "unknown" | "paper" = live ? "unknown" : "paper";
       const tExec = Date.now();
       if (live) {
-        if (!beginSigning(w.account)) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "swap",
+          tokenIn: decision.tokenIn,
+          tokenOut: decision.tokenOut,
+          amountIn: decision.amountIn,
+          expectedOut: decision.route.amountOut,
+          sizeUsd: decision.amountIn * (usdPriceOf(decision.tokenIn, book) || 0),
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          ...(decision.opportunity?.expectedNetEdgePct != null
+            ? { predEdgePct: decision.opportunity.expectedNetEdgePct }
+            : {}),
+          ...routeIntentMeta(decision.route),
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         try {
           const exec = await signAndPushSwap({
             account: w.account,
@@ -2618,7 +2676,24 @@ async function runBotOnceInner(
       let realizedQuote: number | null = null;
       const t0 = Date.now();
       if (live) {
-        if (!beginSigning(w.account)) return decision;
+        const signingIntent: BotTradeIntent = {
+          action: "arb",
+          tokenIn: qSym,
+          tokenOut: qSym,
+          amountIn: plan.quoteIn,
+          expectedOut: plan.quoteOut,
+          sizeUsd: plan.quoteIn * quoteMarkUsd,
+          strategy: b.strategy,
+          base: baseTok,
+          quote: quoteTok,
+          leefUsd: book.leefUsd,
+          waxUsd: book.waxUsd,
+          predEdgePct: plan.profitPct * 100,
+          poolIds: [plan.buyPool.id, plan.sellPool.id],
+          hops: 2,
+          venues: ["alcor"],
+        };
+        if (!beginSigning(w.account, signingIntent)) return decision;
         const tSign = Date.now();
         try {
           const res = await signAndPushArb({

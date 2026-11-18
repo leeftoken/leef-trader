@@ -23,6 +23,7 @@ import {
   routeSignature,
 } from "@/lib/leef/route-optimizer";
 import {
+  executionForRecovery,
   journal,
   journalAll,
   settleUnknownExecution,
@@ -711,18 +712,27 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
           (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
         );
       }
-      if (matching.length !== 1) {
+      const entry = executionForRecovery(matching);
+      if (!entry) {
         markUnknown(txid);
         useBot.getState().setLastReason(
-          `Transaction ${txid.slice(0, 10)}… is confirmed, but no unique matching live execution record exists. Capital remains locked for safe review.`,
+          `Transaction ${txid.slice(0, 10)}… is confirmed, but its matching execution records conflict or cannot be identified safely. Capital remains locked for review.`,
         );
         return;
       }
 
-      const entry = matching[0]!;
       const bot = useBot.getState();
       let actualOut: number;
-      if (bot.recoveredTxids.includes(txid)) {
+      const intent = persistedTradeIntent();
+      if (intent?.stateApplied) {
+        const outputMeta = entry.tokenOut ? metaOf(entry.tokenOut, context.snapshot) : null;
+        if (!outputMeta) {
+          markUnknown(txid);
+          bot.setLastReason(`Transaction ${txid.slice(0, 10)}… was already applied, but its output token is ambiguous. Capital remains locked.`);
+          return;
+        }
+        actualOut = assetDelta(rec.transfers, context.account, outputMeta.symbol, outputMeta.contract);
+      } else if (bot.recoveredTxids.includes(txid)) {
         const outputMeta = entry.tokenOut ? metaOf(entry.tokenOut, context.snapshot) : null;
         if (!outputMeta) {
           markUnknown(txid);
@@ -916,18 +926,9 @@ export function resumeUnknownTradeRecovery(snap: LeefSnapshot, account: string):
         );
         return;
       }
-      if (intent?.stateApplied) {
-        // The exact transfer was validated and bot state persisted before the
-        // crash. The unique confirmed journal row is now restored; do not add
-        // the same fill to the position a second time.
-        markConfirmed(txid);
-        bot.setLastReason(
-          `Recovered final settlement for ${txid.slice(0, 10)}…; bot state and confirmed journal row were already applied. Live capital is released.`,
-        );
-        return;
-      }
-      // Otherwise, the fill may have landed before bot state was updated. The
-      // read-only recovery validates transfers and applies the position once.
+      // Even when bot state was already applied, inspect transfer evidence
+      // and coalesce the journal before releasing the lock. This is idempotent
+      // and never applies the same fill to the position twice.
       pollUnknown(txid, context);
     })
     .catch((error) => {

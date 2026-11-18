@@ -199,3 +199,17 @@ export function restoreTradeCycleLock(): TradePhase {
   lock = readSavedLock();
   return lock.phase;
 }
+
+
+/**
+ * Release an interrupted pre-broadcast signing lock only after the user has
+ * independently checked wallet activity and confirmed no transaction was
+ * broadcast. This deliberately cannot clear UNKNOWN locks or locks with a
+ * transaction id; those require on-chain reconciliation.
+ */
+export function confirmNoBroadcastAfterReview(): boolean {
+  if (lock.phase !== "blocked" || lock.txid) return false;
+  lock = { phase: "idle", since: Date.now() };
+  persistLock(lock);
+  return true;
+}

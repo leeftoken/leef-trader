@@ -315,6 +315,11 @@ export function markInterruptedSigning(): void {
 }
 
 export function markReconciling(txid: string): void {
+  if (
+    lock.phase !== "broadcasted" &&
+    !(lock.phase === "reconciling" && lock.txid === txid)
+  ) return;
+  if (lock.txid && lock.txid !== txid) return;
   lock = {
     phase: "reconciling",
     txid,
@@ -354,6 +359,7 @@ export function markUnknown(txid: string): void {
   if (
     lock.phase !== "signing" &&
     !(lock.phase === "broadcasted" && lock.txid === txid) &&
+    !(lock.phase === "reconciling" && lock.txid === txid) &&
     !(lock.phase === "unknown" && lock.txid === txid)
   ) return;
   lock = {

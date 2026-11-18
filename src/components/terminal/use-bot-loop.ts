@@ -2118,7 +2118,7 @@ async function runBotOnceInner(
         try {
           const exec = await signAndPushSwap({
             account: w.account,
-            botManaged: true,
+            capitalManaged: true,
             permission: w.permission,
             route: decision.route,
             amountIn: decision.amountIn,
@@ -2331,7 +2331,7 @@ async function runBotOnceInner(
         try {
           const exec = await signAndPushSwap({
             account: w.account,
-            botManaged: true,
+            capitalManaged: true,
             permission: w.permission,
             route: decision.route,
             amountIn: decision.amountLeef,
@@ -2521,7 +2521,7 @@ async function runBotOnceInner(
         try {
           const exec = await signAndPushSwap({
             account: w.account,
-            botManaged: true,
+            capitalManaged: true,
             permission: w.permission,
             route: decision.route,
             amountIn: decision.amountIn,
@@ -2762,7 +2762,7 @@ async function runBotOnceInner(
         try {
           const res = await signAndPushArb({
             account: w.account,
-            botManaged: true,
+            capitalManaged: true,
             permission: w.permission,
             plan,
             minProfitPct: floorPct,

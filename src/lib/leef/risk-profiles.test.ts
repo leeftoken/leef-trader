@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GOALS, DEFAULT_RISK } from "./bot-engine";
-import { WAX_MICRO_ACTIVE_RISK } from "./risk-profiles";
+import { shouldUpgradeLegacyWaxDefaults, WAX_MICRO_ACTIVE_RISK } from "./risk-profiles";
 
 describe("WAX micro active risk profile", () => {
   it("increases opportunity cadence for micropayment markets", () => {
@@ -27,5 +27,17 @@ describe("WAX micro active risk profile", () => {
     expect(WAX_MICRO_ACTIVE_RISK.echoBudgetUsd).toBeGreaterThan(0);
     expect(DEFAULT_GOALS.maxDrawdownPct).toBeGreaterThan(0);
     expect(DEFAULT_GOALS.maxDailyLossPct).toBeGreaterThan(0);
+  });
+});
+
+
+describe("legacy WAX risk migration", () => {
+  it("upgrades only the untouched legacy defaults", () => {
+    expect(shouldUpgradeLegacyWaxDefaults(DEFAULT_RISK)).toBe(true);
+    expect(shouldUpgradeLegacyWaxDefaults({
+      ...DEFAULT_RISK,
+      cooldownSec: 45,
+    })).toBe(false);
+    expect(shouldUpgradeLegacyWaxDefaults(undefined)).toBe(false);
   });
 });

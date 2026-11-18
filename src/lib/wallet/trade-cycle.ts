@@ -210,8 +210,12 @@ export function abortSigning(): void {
  * This never clears a lock with a txid, an active signing attempt, or corrupt
  * storage. The UI must only call it after the user confirms no trade landed.
  */
+export function canConfirmInterruptedSigningNoBroadcast(): boolean {
+  return lock.phase === "blocked" && !lock.txid && lock.blockedCause === "interrupted-signing";
+}
+
 export function confirmInterruptedSigningNoBroadcast(): boolean {
-  if (lock.phase !== "blocked" || lock.txid || lock.blockedCause !== "interrupted-signing") {
+  if (!canConfirmInterruptedSigningNoBroadcast()) {
     return false;
   }
   lock = { phase: "idle", since: Date.now() };

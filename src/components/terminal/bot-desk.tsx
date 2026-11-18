@@ -60,7 +60,7 @@ import { isEconomicFailureReason } from "@/lib/wallet/trade-error";
 import { holdWakeLock, releaseWakeLock } from "@/lib/market/wake-lock";
 import { tokenPrice } from "@/lib/market/price-oracle";
 import { aiTask, extractGrowthTargets } from "@/lib/leef/ai-analyst";
-import { executionForRecovery, journal, journalAll, settleUnknownExecution } from "@/lib/leef/journal";
+import { executionForRecovery, journal, journalAll, liveExecutionOutcomeMatchesChain, settleUnknownExecution } from "@/lib/leef/journal";
 import { ensureUnknownExecutionJournal } from "@/lib/wallet/recovery-journal";
 import { canConfirmInterruptedSigningNoBroadcast, confirmInterruptedSigningNoBroadcast, liveCapitalBlocked, markConfirmed, markFailed, pendingTxid, tradeAccount, tradeIntent as persistedTradeIntent, tradePhase, tradeStartedAt } from "@/lib/wallet/trade-cycle";
 import { assetDelta, waitForTransaction, type ReconcileResult } from "@/lib/wallet/reconcile";
@@ -208,7 +208,15 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
       // exact duplicate rows while preserving any already-recorded outcome.
       const journalSaved = await settleUnknownExecution(unresolvedTxid, actualOut);
       if (!journalSaved) {
-        setRecoveryNotice("The position recovery is saved, but the evidence journal could not be updated. The live capital lock remains in place; inspect again to safely finish.");
+        if (liveExecutionOutcomeMatchesChain(matching, unresolvedTxid, actualOut)) {
+          // Chain transfers and position state are already verified. A failed
+          // audit write must not freeze the entire trader when saved identity
+          // and any existing realized output still agree with the chain.
+          markConfirmed(unresolvedTxid);
+          setRecoveryNotice("The transaction and position are verified on-chain. The evidence journal write is still pending, but its saved execution records agree with the chain. Live trading is unlocked; the audit row may need repair.");
+          return;
+        }
+        setRecoveryNotice("The journal could not be settled and its saved execution details do not safely match the confirmed chain outcome. The live capital lock remains in place for review.");
         return;
       }
       markConfirmed(unresolvedTxid); // clear the guard only after state + journal reconciliation
@@ -499,7 +507,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               )}
               {recoveryResult.status === "failed" && <p className="mt-1 text-[11px] text-muted-foreground">{recoveryResult.error}</p>}
               {recoveryNotice && <p className="mt-2 text-[11px] text-muted-foreground">{recoveryNotice}</p>}
-              <p className="mt-2 text-[11px] text-muted-foreground">Recovery is read-only: it never retries or broadcasts. A successful transaction unlocks trading only after the matching saved execution is verified, bot position state is updated idempotently, and the evidence journal is settled.</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">Recovery is read-only: it never retries or broadcasts. Confirmed chain transfers and an idempotently updated position release the trading lock when saved execution details agree with the chain. If the evidence journal write itself fails, trading can resume while audit repair remains pending; conflicting execution records stay locked for review.</p>
             </div>
           )}
         </Card>

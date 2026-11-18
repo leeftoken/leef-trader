@@ -3,12 +3,17 @@ import type { BotTradeIntent } from "@/lib/wallet/trade-cycle";
 
 const store = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
-vi.mock("@/lib/leef/journal", () => ({
-  journal: (entry: object) => {
+vi.mock("@/lib/leef/journal", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/leef/journal")>();
+  return {
+    ...actual,
+    executionForRecovery: actual.executionForRecovery,
+    journal: (entry: object) => {
     store.rows.push({ ...(entry as Record<string, unknown>), ts: 123 });
   },
-  journalAll: async () => store.rows.map((row) => ({ ...row })),
-}));
+    journalAll: async () => store.rows.map((row) => ({ ...row })),
+  };
+});
 
 import { ensureUnknownExecutionJournal } from "./recovery-journal";
 
@@ -59,9 +64,32 @@ describe("ensureUnknownExecutionJournal", () => {
   });
 
   it("accepts one existing unresolved row without requiring a persisted intent", async () => {
-    store.rows.push({ kind: "execution", mode: "live", txid, status: "unknown" });
+    store.rows.push({
+      kind: "execution", mode: "live", txid, status: "unknown",
+      action: "buy", tokenIn: "WAX", tokenOut: "LEEF",
+      amountIn: 2, expectedOut: 1200, strategy: "auto",
+    });
     expect(await ensureUnknownExecutionJournal(txid, undefined)).toBe(true);
     expect(store.rows).toHaveLength(1);
+  });
+
+  it("accepts equivalent UNKNOWN and CONFIRMED rows for one complete trade", async () => {
+    const common = {
+      kind: "execution", mode: "live", txid, action: "arb",
+      tokenIn: "WAX@eosio.token", tokenOut: "WAX@eosio.token",
+      amountIn: 1.70445894, expectedOut: 1.70445894, strategy: "volume",
+    };
+    store.rows.push(
+      { ...common, status: "unknown", ts: 100 },
+      { ...common, status: "confirmed", actualOut: -0.04998575, reconciledAt: 101, ts: 102 },
+    );
+    expect(await ensureUnknownExecutionJournal(txid, intent)).toBe(true);
+    expect(store.rows).toHaveLength(2);
+  });
+
+  it("rejects an incomplete single execution row even when its txid matches", async () => {
+    store.rows.push({ kind: "execution", mode: "live", txid, status: "unknown" });
+    expect(await ensureUnknownExecutionJournal(txid, intent)).toBe(false);
   });
 
   it("fails closed when the transaction has duplicate execution rows", async () => {

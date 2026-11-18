@@ -24,6 +24,7 @@ import {
 } from "@/lib/leef/route-optimizer";
 import {
   executionForRecovery,
+  liveExecutionOutcomeMatchesChain,
   journal,
   journalAll,
   settleUnknownExecution,
@@ -762,9 +763,19 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
 
       const settled = await settleUnknownExecution(txid, actualOut);
       if (!settled) {
+        if (liveExecutionOutcomeMatchesChain(matching, txid, actualOut)) {
+          // Never keep the whole live engine locked solely because IndexedDB
+          // rejected an audit write after chain transfers and position state
+          // were already verified. Conflicting records still fail closed.
+          markConfirmed(txid);
+          useBot.getState().setLastReason(
+            `Transaction ${txid.slice(0, 10)}… and position are verified from chain transfers. The audit journal write is pending, but saved execution records agree with the chain; live trading is unlocked.`,
+          );
+          return;
+        }
         markUnknown(txid);
         useBot.getState().setLastReason(
-          `Transaction ${txid.slice(0, 10)}… position is reconciled, but the evidence journal is not settled. Automatic recovery will retry safely.`,
+          `Transaction ${txid.slice(0, 10)}… position is reconciled, but the evidence journal conflicts with chain settlement. Capital remains locked for review.`,
         );
         return;
       }

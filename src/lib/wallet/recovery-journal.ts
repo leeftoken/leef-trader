@@ -28,7 +28,9 @@ export async function ensureUnknownExecutionJournal(
     (entry) => entry.kind === "execution" && entry.mode === "live" && entry.txid === txid,
   );
   if (matches.length === 1) {
-    const status = matches[0]?.status;
+    const existing = executionForRecovery(matches);
+    if (!existing) return false;
+    const status = existing.status;
     return status === desiredStatus || (!!intent?.stateApplied && status === "confirmed");
   }
   if (matches.length > 1) {

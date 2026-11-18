@@ -106,11 +106,13 @@ The swap desk shows a caution (≥ 0.5) or warning (≥ 0.7) notice for the pair
 
 Separate from the analyst gateway: `POST /api/jev` asks TypeSafe Jev for
 typed judgments that `ai-executor.ts` turns into a proposal. Noul values are
-probabilities of “yes”; their selected-side confidence is
-`max(noul, 1 - noul)`, while Choice confidence is passed through unchanged.
-The proposal uses the weakest relevant judgment and is bound to a versioned
-fingerprint of the exact candidate (strategy, contract-aware pair, input
-amount, USD notional, expected output/edge, impact, pool liquidity, pools, hops and route).
+direct probabilities of “yes” and are applied as explicit safety gates:
+`riskStress` must be ≤ 0.5 and `riskExecute` must be ≥ 0.5. Choice confidence
+is passed through unchanged; proposal confidence is the action Choice only.
+The buy/swap size bucket is a bounded sizing preference and does not lower
+authorization confidence. The proposal is bound to a versioned fingerprint of
+the exact candidate (strategy, contract-aware pair, input amount, USD notional,
+expected output/edge, impact, pool liquidity, pools, hops and route).
 Default is **OFF** (zero Jev calls).
 
 - **SUGGEST** — Jev runs on the existing background/non-blocking cadence;

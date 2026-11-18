@@ -3,6 +3,7 @@ import {
   TRADE_CYCLE_STORAGE_KEY,
   abortSigning,
   beginSigning,
+  confirmNoBroadcastAfterReview,
   liveCapitalBlocked,
   markBroadcast,
   markConfirmed,
@@ -42,6 +43,26 @@ describe("live capital lock", () => {
     expect(restoreTradeCycleLock()).toBe("blocked");
     expect(liveCapitalBlocked()).toBe(true);
     expect(unknownBlockReason()).toContain("interrupted");
+  });
+
+
+  it("releases only a blocked no-txid lock after explicit wallet review", () => {
+    expect(beginSigning()).toBe(true);
+    expect(restoreTradeCycleLock()).toBe("blocked");
+    expect(confirmNoBroadcastAfterReview()).toBe(true);
+    expect(tradePhase()).toBe("idle");
+    expect(liveCapitalBlocked()).toBe(false);
+    expect(localStorage.getItem(TRADE_CYCLE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("never lets the no-broadcast review clear a txid-backed UNKNOWN lock", () => {
+    expect(beginSigning()).toBe(true);
+    markBroadcast("c".repeat(64));
+    expect(restoreTradeCycleLock()).toBe("unknown");
+    expect(confirmNoBroadcastAfterReview()).toBe(false);
+    expect(tradePhase()).toBe("unknown");
+    expect(liveCapitalBlocked()).toBe(true);
+    expect(pendingTxid()).toBe("c".repeat(64));
   });
 
   it("clears persisted lock only after an explicit confirmed or failed outcome", () => {

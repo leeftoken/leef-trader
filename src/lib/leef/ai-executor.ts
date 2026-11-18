@@ -446,39 +446,50 @@ export function buildAiCandidateKey(
   return JSON.stringify(fingerprint);
 }
 
-/** Noul → confidence in the yes/no answer (0.5 = uncertain, 1 = certain). */
-function noulConfidence(noul: number): number {
-  // System One Noul is P(yes), not a centered confidence score. Confidence
-  // is the probability of the selected side: max(P(yes), P(no)).
-  return Math.max(noul, 1 - noul);
-}
-
 function choiceOf(
   answers: JevAnswers,
   qid: string,
 ): { choice: string; confidence: number } | null {
   const a = answers[qid];
-  if (!a || a.type !== "choice" || typeof a.choice !== "string") return null;
+  if (!a || a.type.trim().toLowerCase() !== "choice" || typeof a.choice !== "string") return null;
+  // TypeSafe providers may vary only in casing/whitespace or omit the scalar
+  // confidence while returning the selected choice's probability map.
+  const choice = a.choice.trim().toLowerCase();
+  const distribution = a.probabilities ? Object.values(a.probabilities) : [];
+  const distributionValid =
+    distribution.length >= 2 &&
+    distribution.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
+    Math.abs(distribution.reduce((sum, p) => sum + p, 0) - 1) <= 0.02;
+  const peak = distributionValid ? Math.max(...distribution) : Number.NaN;
+  const derivedConfidence = distributionValid
+    ? (peak - 1 / distribution.length) / (1 - 1 / distribution.length)
+    : Number.NaN;
+  const confidence = typeof a.confidence === "number"
+    ? a.confidence
+    : derivedConfidence;
   if (
-    typeof a.confidence !== "number" ||
-    !Number.isFinite(a.confidence) ||
-    a.confidence < 0 ||
-    a.confidence > 1
+    !choice ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1
   ) return null;
-  return { choice: a.choice, confidence: a.confidence };
+  return { choice, confidence };
 }
 
 function noulOf(answers: JevAnswers, qid: string): number | null {
   const a = answers[qid];
+  if (!a || a.type.trim().toLowerCase() !== "noul") return null;
+  // The canonical gateway field is noul (P(true)); accept the equivalent
+  // boolean probability map used by some TypeSafe response adapters.
+  const mapped = a.probabilities?.true ?? a.probabilities?.yes ?? a.probabilities?.["1"];
+  const noul = typeof a.noul === "number" ? a.noul : mapped;
   if (
-    !a ||
-    a.type !== "noul" ||
-    typeof a.noul !== "number" ||
-    !Number.isFinite(a.noul) ||
-    a.noul < 0 ||
-    a.noul > 1
+    typeof noul !== "number" ||
+    !Number.isFinite(noul) ||
+    noul < 0 ||
+    noul > 1
   ) return null;
-  return a.noul;
+  return noul;
 }
 
 /**
@@ -507,10 +518,12 @@ export function parseAiProposal(
   const stress = noulOf(answers, AI_QID.riskStress);
   if (execOk == null || stress == null) return null;
 
+  // The action Choice confidence is the decision confidence. Noul values
+  // are direct P(yes) safety probabilities and are gated below as probabilities;
+  // they must not be converted into generic confidence and mixed with Choice.
+  // The size bucket is a bounded sizing preference, not an authorization signal.
   const judgments: { qid: string; confidence: number }[] = [
     { qid: AI_QID.action, confidence: actionAns.confidence },
-    { qid: AI_QID.riskExecute, confidence: noulConfidence(execOk) },
-    { qid: AI_QID.riskStress, confidence: noulConfidence(stress) },
   ];
   const params: Record<string, string> = {};
   const rationale: string[] = ["action=" + action + " p=" + actionAns.confidence.toFixed(2)];
@@ -527,7 +540,6 @@ export function parseAiProposal(
     const size = choiceOf(answers, AI_QID.sizeBucket);
     if (!size || !(size.choice in SIZE_BUCKET_PCT)) return null;
     params.sizePct = String(SIZE_BUCKET_PCT[size.choice]);
-    judgments.push({ qid: AI_QID.sizeBucket, confidence: size.confidence });
     rationale.push("size=" + size.choice + " p=" + size.confidence.toFixed(2));
   }
 

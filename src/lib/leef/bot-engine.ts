@@ -1844,12 +1844,18 @@ export function evaluateBot(input: BotInput): Decision {
           gridFeePct(snap, quote),
         );
         const anchor = input.gridAnchor;
-        if ((anchor == null || baseUsd <= anchor * (1 - step / 100)) && regW("grid") > 0) {
+        // Auto is an opportunity selector, not an implicit grid strategy.
+        // A missing grid anchor is not a buy signal; Grid mode owns its own
+        // deliberate seed entry. Auto may use grid only after an anchor exists
+        // and price reaches a verified step below it.
+        if (anchor != null && baseUsd <= anchor * (1 - step / 100) && regW("grid") > 0) {
           theses.push({
             reason: `Auto: grid step −${step.toFixed(2)}% zone${regTag}`,
             expected: step * 0.8 * regW("grid"),
             confidence: regW("grid"),
           });
+        } else if (anchor == null) {
+          considered.push("grid inactive — Auto will not seed an unanchored grid");
         }
       }
       for (const t of theses) pushScored(tryBuyWith(t.reason, t.expected, t.confidence, maxIn));

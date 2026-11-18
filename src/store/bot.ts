@@ -460,7 +460,8 @@ export const useBot = create<BotState>()(
       // v14: distinguish executed transactions from settled closed outcomes.
       // Legacy win counters have no trustworthy denominator, so reset them.
       // v15: persist txids already applied by the explicit recovery flow.
-      version: 15,
+      // v16: apply the bounded WAX Micro Active defaults to untouched v15 saves.
+      version: 16,
       migrate: (persisted, version) => {
         const p = (
           persisted && typeof persisted === "object" ? persisted : {}

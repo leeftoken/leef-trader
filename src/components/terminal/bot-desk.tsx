@@ -507,7 +507,7 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
               )}
               {recoveryResult.status === "failed" && <p className="mt-1 text-[11px] text-muted-foreground">{recoveryResult.error}</p>}
               {recoveryNotice && <p className="mt-2 text-[11px] text-muted-foreground">{recoveryNotice}</p>}
-              <p className="mt-2 text-[11px] text-muted-foreground">Recovery is read-only: it never retries or broadcasts. A successful transaction unlocks trading only after the matching saved execution is verified, bot position state is updated idempotently, and the evidence journal is settled.</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">Recovery is read-only: it never retries or broadcasts. Confirmed chain transfers and an idempotently updated position release the trading lock when saved execution details agree with the chain. If the evidence journal write itself fails, trading can resume while audit repair remains pending; conflicting execution records stay locked for review.</p>
             </div>
           )}
         </Card>

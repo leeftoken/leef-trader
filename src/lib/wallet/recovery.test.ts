@@ -134,6 +134,38 @@ describe("assessUnknownExecution", () => {
     expect(assessUnknownExecution(arb, transfers, context)).toMatchObject({ ok: false });
   });
 
+
+  it("recovers a real multi-leg Alcor round-trip while excluding the separate platform fee from the swap debit", () => {
+    const arb = execution({
+      action: "arb",
+      tokenIn: "WAX",
+      tokenOut: "WAX",
+      amountIn: 42.93192136,
+      sizeUsd: 4.293192136,
+      waxUsd: 0.1,
+    });
+    const transfers: TxTransfer[] = [
+      { contract: "eosio.token", from: account, to: "swap.alcor", quantity: "19.74868383 WAX", amount: 19.74868383, symbol: "WAX", memo: "swapexactin#217" },
+      { contract: "eosio.token", from: account, to: "swap.alcor", quantity: "19.31936461 WAX", amount: 19.31936461, symbol: "WAX", memo: "swapexactin#12840" },
+      { contract: "eosio.token", from: account, to: "swap.alcor", quantity: "3.86387292 WAX", amount: 3.86387292, symbol: "WAX", memo: "swapexactin#12361,12467,11722" },
+      { contract: "leefmaincorp", from: "swap.alcor", to: account, quantity: "418010.3876 LEEF", amount: 418010.3876, symbol: "LEEF", memo: "Swap tokenOut - Pool ID #217" },
+      { contract: "leefmaincorp", from: "swap.alcor", to: account, quantity: "409418.1169 LEEF", amount: 409418.1169, symbol: "LEEF", memo: "Swap tokenOut - Pool ID #12840" },
+      { contract: "leefmaincorp", from: account, to: "swap.alcor", quantity: "538570.5186 LEEF", amount: 538570.5186, symbol: "LEEF", memo: "sell leg" },
+      { contract: "leefmaincorp", from: account, to: "swap.alcor", quantity: "344331.9709 LEEF", amount: 344331.9709, symbol: "LEEF", memo: "sell leg" },
+      { contract: "eosio.token", from: "swap.alcor", to: account, quantity: "16.17073519 WAX", amount: 16.17073519, symbol: "WAX", memo: "Swap tokenOut - Pool ID #217" },
+      { contract: "eosio.token", from: "swap.alcor", to: account, quantity: "25.39766246 WAX", amount: 25.39766246, symbol: "WAX", memo: "Swap tokenOut - Pool ID #12840" },
+      { contract: "leefmaincorp", from: "swap.alcor", to: account, quantity: "81961.0599 LEEF", amount: 81961.0599, symbol: "LEEF", memo: "Swap tokenOut - Pool ID #11722" },
+      { contract: "eosio.token", from: account, to: "smart.ass", quantity: "0.00040868 WAX", amount: 0.00040868, symbol: "WAX", memo: "leef-trader platform fee (0.001%)" },
+    ];
+    const result = assessUnknownExecution(arb, transfers, context);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.nextPosition?.amountLeef).toBeCloseTo(26487.0749, 4);
+    expect(result.nextPosition?.mode).toBe("live");
+    expect(result.recoveredPnlUsd).toBeDefined();
+    expect(result.actualOut).toBeCloseTo(-1.36393239, 8);
+  });
+
   it("refuses entries without a stored live execution identity", () => {
     expect(
       assessUnknownExecution(execution({ status: "paper" }), buyTransfers, context),

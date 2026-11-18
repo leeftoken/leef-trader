@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { unavailableSnapshot } from "@/lib/leef/fallback";
 import { rankPools } from "@/lib/leef/rank";
 import { loadSeedSnapshot } from "@/lib/leef/seed";
+import { loadLocalSnapshot, saveLocalSnapshot } from "@/lib/leef/local-snapshot";
 import type { LeefSnapshot } from "@/lib/leef/types";
 import { marketEngine } from "@/lib/market/market-engine";
 import { clampSyncSec, DEFAULT_SYNC_SEC, useTerminal } from "@/store/terminal";
@@ -29,20 +30,30 @@ export function useSnapshot() {
   const lastFetchAt = useMarketEngineSelector(selectLastFetchAt);
   const syncSec = useTerminal((s) => clampSyncSec(s.syncSec ?? DEFAULT_SYNC_SEC));
 
-  // Instant first paint: the build-time seed book (public/seed-snapshot.json)
-  // fills the gap until the market engine's first live pull lands. The engine
-  // starts fetching immediately on boot, so the seed is refresh-behind by
-  // construction — engine.snapshot replaces it as soon as chain state exists.
+  // Instant first paint, freshest source wins: the local backup of the last
+  // live book (survives reloads, written below) beats the build-time seed
+  // whenever it is newer. Both are paint-only — the engine's first live pull
+  // replaces them, and the staleness gate keeps trading impossible until then.
   const [seed, setSeed] = useState<LeefSnapshot | null>(null);
   useEffect(() => {
     let live = true;
-    void loadSeedSnapshot().then((s) => {
-      if (live && s) setSeed(s);
+    void Promise.all([loadLocalSnapshot(), loadSeedSnapshot()]).then(([local, buildSeed]) => {
+      if (!live) return;
+      const candidates = [local, buildSeed].filter((s): s is LeefSnapshot => s != null);
+      const freshest = candidates.sort(
+        (a, b) => Date.parse(b.fetchedAt) - Date.parse(a.fetchedAt),
+      )[0];
+      if (freshest) setSeed(freshest);
     });
     return () => {
       live = false;
     };
   }, []);
+
+  // Local backup writer: keep the last live book on disk for instant reloads.
+  useEffect(() => {
+    if (liveSnapshot) saveLocalSnapshot(liveSnapshot);
+  }, [liveSnapshot]);
 
   const snap = liveSnapshot ?? seed ?? placeholder;
   const ranked = useMemo(() => rankPools(snap.pools, snap), [snap]);

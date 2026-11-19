@@ -48,7 +48,7 @@ import {
   suggestPair,
   type AdvisorSuggestion,
 } from "@/lib/leef/advisor";
-import { resumeUnknownTradeRecovery, runBotOnce } from "./use-bot-loop";
+import { resumeBotAfterVerifiedSettlement, resumeUnknownTradeRecovery, runBotOnce } from "./use-bot-loop";
 import {
   GROWTH_MODES,
   listTreasureTokens,
@@ -135,7 +135,8 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
       setRecoveryResult(result);
       if (result.status === "failed") {
         markFailed(unresolvedTxid);
-        setRecoveryNotice("The transaction failure was independently confirmed. The live capital lock has been released; no fill was booked.");
+        const resumed = resumeBotAfterVerifiedSettlement(account);
+        setRecoveryNotice(`The transaction failure was independently confirmed. The live capital lock has been released; no fill was booked.${resumed ? " Your previous bot session has resumed." : ""}`);
         return;
       }
       if (result.status !== "confirmed") {
@@ -213,14 +214,16 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
           // audit write must not freeze the entire trader when saved identity
           // and any existing realized output still agree with the chain.
           markConfirmed(unresolvedTxid);
-          setRecoveryNotice("The transaction and position are verified on-chain. The evidence journal write is still pending, but its saved execution records agree with the chain. Live trading is unlocked; the audit row may need repair.");
+          const resumed = resumeBotAfterVerifiedSettlement(account);
+          setRecoveryNotice(`The transaction and position are verified on-chain. The evidence journal write is still pending, but its saved execution records agree with the chain. Live trading is unlocked${resumed ? " and your previous bot session has resumed" : ""}; the audit row may need repair.`);
           return;
         }
         setRecoveryNotice("The journal could not be settled and its saved execution details do not safely match the confirmed chain outcome. The live capital lock remains in place for review.");
         return;
       }
       markConfirmed(unresolvedTxid); // clear the guard only after state + journal reconciliation
-      setRecoveryNotice("Recovered from confirmed on-chain transfers. Bot position state and the evidence journal are reconciled; the live capital lock is released. Historical P&L was not estimated.");
+      const resumed = resumeBotAfterVerifiedSettlement(account);
+      setRecoveryNotice(`Recovered from confirmed on-chain transfers. Bot position state and the evidence journal are reconciled; the live capital lock is released${resumed ? " and your previous bot session has resumed" : ""}. Historical P&L was not estimated.`);
     } catch (error) {
       setRecoveryNotice(error instanceof Error ? error.message : "Recovery inspection failed. The live capital lock remains in place.");
     } finally {
@@ -421,10 +424,13 @@ export function BotDesk({ snap }: { snap: LeefSnapshot }) {
                           variant="destructive"
                           onClick={() => {
                             const released = confirmInterruptedSigningNoBroadcast(recoveryAccount);
+                            const resumed = released && resumeBotAfterVerifiedSettlement(recoveryAccount);
                             setConfirmNoBroadcast(false);
                             setRecoveryNotice(
                               released
-                                ? "Interrupted signing lock released after your account-history confirmation. Start with a small test clip and verify its settlement."
+                                ? resumed
+                                  ? "Interrupted signing lock released after your account-history confirmation. Your previous bot session has resumed."
+                                  : "Interrupted signing lock released after your account-history confirmation. Start with a small test clip and verify its settlement."
                                 : "The lock could not be released. It remains in place for safety.",
                             );
                           }}

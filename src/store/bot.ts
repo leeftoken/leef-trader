@@ -27,6 +27,7 @@ import {
   type RejectionStreak,
 } from "@/lib/leef/retry-storm";
 import { setNeftyVenueEnabled } from "@/lib/leef/venue-adapters";
+import { liveCapitalBlocked, tradeIntent as persistedTradeIntent } from "@/lib/wallet/trade-cycle";
 
 export type BotDecisionKind = "buy" | "sell" | "arb" | "swap" | "hold" | "skip" | "stop" | "error";
 
@@ -91,6 +92,8 @@ const MAX_LOG = 60;
 
 type BotState = {
   running: boolean;
+  /** Prior live/paper session intent, used only after verified lock recovery. */
+  resumeAfterRecovery: boolean;
   strategy: BotStrategy;
   /** Asset being accumulated (usually LEEF). */
   base: string;
@@ -139,6 +142,8 @@ type BotState = {
 
   start: (equityUsd: number) => void;
   stop: (reason?: string) => void;
+  /** Resume a previously active session only after settlement was verified. */
+  resumeAfterVerifiedSettlement: () => boolean;
   setStrategy: (s: BotStrategy) => void;
   setBase: (q: string) => void;
   setQuote: (q: string) => void;
@@ -207,6 +212,8 @@ export const useBot = create<BotState>()(
   persist(
     (set, get) => ({
       running: false,
+      // Legacy locks with a recoverable bot intent should resume after verified settlement.
+      resumeAfterRecovery: liveCapitalBlocked() && !!persistedTradeIntent(),
       strategy: "auto",
       base: "LEEF",
       quote: "WAX",
@@ -235,6 +242,7 @@ export const useBot = create<BotState>()(
       start: (equityUsd) =>
         set((s) => ({
           running: true,
+          resumeAfterRecovery: true,
           stats:
             s.stats.trades === 0 && s.stats.realizedUsd === 0
               ? freshStats(equityUsd)
@@ -242,7 +250,16 @@ export const useBot = create<BotState>()(
           lastReason: "Bot running — scanning each 30s book pull",
         })),
       stop: (reason) =>
-        set({ running: false, lastReason: reason ?? "Bot stopped" }),
+        set({ running: false, resumeAfterRecovery: false, lastReason: reason ?? "Bot stopped" }),
+      resumeAfterVerifiedSettlement: () => {
+        const s = get();
+        if (!s.resumeAfterRecovery || s.strategyHalt || liveCapitalBlocked()) return false;
+        set({
+          running: true,
+          lastReason: "Verified transaction recovery complete — previous trading session resumed",
+        });
+        return true;
+      },
       setStrategy: (strategy) =>
         set({ strategy, gridAnchor: null, lastReason: `Strategy: ${strategy}` }),
       setBase: (base) => {
@@ -593,6 +610,8 @@ export const useBot = create<BotState>()(
         decisions: s.decisions.slice(0, 30),
         riskMigrationNotice: s.riskMigrationNotice,
         neftyVenue: s.neftyVenue,
+        // Persist only the operator intent to resume after verified settlement; never persist `running`.
+        resumeAfterRecovery: s.resumeAfterRecovery,
         // Persisted: a reload must never silently resume a retry storm.
         strategyHalt: s.strategyHalt,
       }),

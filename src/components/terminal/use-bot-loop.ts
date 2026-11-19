@@ -664,6 +664,13 @@ type UnknownRecoveryContext = {
   strategy: ReturnType<typeof useBot.getState>["strategy"];
 };
 
+/** Resume only the account whose transaction was verified, and only when the user had left the bot running. */
+export function resumeBotAfterVerifiedSettlement(account: string): boolean {
+  const wallet = useWallet.getState();
+  if (!account || wallet.account !== account || !wallet.canSign()) return false;
+  return useBot.getState().resumeAfterVerifiedSettlement();
+}
+
 const unknownRecoveryInFlight = new Set<string>();
 
 /**
@@ -686,8 +693,9 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
 
       if (rec.status === "failed") {
         markFailed(txid);
+        const resumed = resumeBotAfterVerifiedSettlement(context.account);
         useBot.getState().setLastReason(
-          `Transaction ${txid.slice(0, 10)}… was independently confirmed failed on-chain; no fill was booked.`,
+          `Transaction ${txid.slice(0, 10)}… was independently confirmed failed on-chain; no fill was booked.${resumed ? " The previous bot session has resumed." : ""}`,
         );
         return;
       }
@@ -768,8 +776,9 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
           // rejected an audit write after chain transfers and position state
           // were already verified. Conflicting records still fail closed.
           markConfirmed(txid);
+          const resumed = resumeBotAfterVerifiedSettlement(context.account);
           useBot.getState().setLastReason(
-            `Transaction ${txid.slice(0, 10)}… and position are verified from chain transfers. The audit journal write is pending, but saved execution records agree with the chain; live trading is unlocked.`,
+            `Transaction ${txid.slice(0, 10)}… and position are verified from chain transfers. The audit journal write is pending, but saved execution records agree with the chain; live trading is unlocked.${resumed ? " The previous bot session has resumed." : ""}`,
           );
           return;
         }
@@ -781,8 +790,9 @@ function pollUnknown(txid: string, context: UnknownRecoveryContext): void {
       }
 
       markConfirmed(txid);
+      const resumed = resumeBotAfterVerifiedSettlement(context.account);
       useBot.getState().setLastReason(
-        `Transaction ${txid.slice(0, 10)}… automatically reconciled from confirmed chain transfers. Live trading can resume; historical P&L was not estimated.`,
+        `Transaction ${txid.slice(0, 10)}… automatically reconciled from confirmed chain transfers. Live trading is unlocked${resumed ? " and the previous bot session has resumed" : ""}; historical P&L was not estimated.`,
       );
     } catch (error) {
       if (pendingTxid() === txid) {
@@ -3116,6 +3126,11 @@ let prevRunning = false;
 let lastProposalRefresh = 0;
 
 export async function botOnSnapshot(snap: LeefSnapshot): Promise<void> {
+  // Recovery is owned by the market loop, not the currently visible React tab.
+  // This keeps unresolved locks reconciling even when the Bot desk is not mounted.
+  const wallet = useWallet.getState();
+  if (wallet.account && wallet.canSign()) resumeUnknownTradeRecovery(snap, wallet.account);
+
   const b = useBot.getState();
   const justStarted = b.running && !prevRunning;
   prevRunning = b.running;

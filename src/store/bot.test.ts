@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { useBot } from "./bot";
+import { beginSigning, markBroadcast, markFailed } from "@/lib/wallet/trade-cycle";
 
 const originalStats = useBot.getState().stats;
+const originalRunning = useBot.getState().running;
+const originalResumeIntent = useBot.getState().resumeAfterRecovery;
 
 afterEach(() => {
-  useBot.setState({ stats: originalStats });
+  useBot.setState({
+    stats: originalStats,
+    running: originalRunning,
+    resumeAfterRecovery: originalResumeIntent,
+    strategyHalt: null,
+  });
 });
 
 describe("live and paper session accounting", () => {
@@ -27,5 +35,55 @@ describe("live and paper session accounting", () => {
     // values presented by the Bot desk.
     expect(after.realizedUsd).toBe((before.realizedUsd ?? 0) + 2.75);
     expect(after.closedTrades).toBe((before.closedTrades ?? 0) + 2);
+  });
+});
+
+describe("trading resume after verified recovery", () => {
+  it("remembers an active bot's intent to resume after a reload recovery", () => {
+    useBot.getState().start(100);
+
+    expect(useBot.getState().resumeAfterRecovery).toBe(true);
+  });
+
+  it("does not resume after the user manually stops the bot", () => {
+    useBot.getState().start(100);
+    useBot.getState().stop("Stopped by user");
+
+    expect(useBot.getState().resumeAfterRecovery).toBe(false);
+    expect(useBot.getState().resumeAfterVerifiedSettlement()).toBe(false);
+    expect(useBot.getState().running).toBe(false);
+  });
+
+  it("resumes the previous session after verified settlement", () => {
+    useBot.setState({
+      running: false,
+      resumeAfterRecovery: true,
+      strategyHalt: null,
+    });
+
+    expect(useBot.getState().resumeAfterVerifiedSettlement()).toBe(true);
+    expect(useBot.getState().running).toBe(true);
+  });
+
+  it("does not resume while the live capital lock is still active", () => {
+    useBot.setState({ running: false, resumeAfterRecovery: true, strategyHalt: null });
+    const txid = "a".repeat(64);
+
+    expect(beginSigning()).toBe(true);
+    markBroadcast(txid);
+    expect(useBot.getState().resumeAfterVerifiedSettlement()).toBe(false);
+    expect(useBot.getState().running).toBe(false);
+    markFailed(txid);
+  });
+
+  it("does not bypass a strategy retry-storm halt during recovery", () => {
+    useBot.setState({
+      running: false,
+      resumeAfterRecovery: true,
+      strategyHalt: { strategy: "auto", reason: "repeated chain rejection", at: Date.now() },
+    });
+
+    expect(useBot.getState().resumeAfterVerifiedSettlement()).toBe(false);
+    expect(useBot.getState().running).toBe(false);
   });
 });

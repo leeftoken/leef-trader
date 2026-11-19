@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { useBot } from "./bot";
+import { beginSigning, markBroadcast, markFailed } from "@/lib/wallet/trade-cycle";
 
 const originalStats = useBot.getState().stats;
 const originalRunning = useBot.getState().running;
@@ -62,6 +63,17 @@ describe("trading resume after verified recovery", () => {
 
     expect(useBot.getState().resumeAfterVerifiedSettlement()).toBe(true);
     expect(useBot.getState().running).toBe(true);
+  });
+
+  it("does not resume while the live capital lock is still active", () => {
+    useBot.setState({ running: false, resumeAfterRecovery: true, strategyHalt: null });
+    const txid = "a".repeat(64);
+
+    expect(beginSigning()).toBe(true);
+    markBroadcast(txid);
+    expect(useBot.getState().resumeAfterVerifiedSettlement()).toBe(false);
+    expect(useBot.getState().running).toBe(false);
+    markFailed(txid);
   });
 
   it("does not bypass a strategy retry-storm halt during recovery", () => {

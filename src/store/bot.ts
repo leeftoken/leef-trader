@@ -253,7 +253,7 @@ export const useBot = create<BotState>()(
         set({ running: false, resumeAfterRecovery: false, lastReason: reason ?? "Bot stopped" }),
       resumeAfterVerifiedSettlement: () => {
         const s = get();
-        if (!s.resumeAfterRecovery || s.strategyHalt) return false;
+        if (!s.resumeAfterRecovery || s.strategyHalt || liveCapitalBlocked()) return false;
         set({
           running: true,
           lastReason: "Verified transaction recovery complete — previous trading session resumed",

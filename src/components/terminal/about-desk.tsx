@@ -34,7 +34,7 @@ export function AboutDesk() {
       {BLOCKS.slice(0, 3).map((b) => <Block key={b.heading} b={b} />)}
       <section className="space-y-1">
         <h3 className="font-medium"><img src={`${import.meta.env.BASE_URL}tokens/sat-64.png`} alt="SAT" width={24} height={24} className="inline-block h-6 w-6 rounded-full mr-2 align-middle" />SAT token</h3>
-        <p>Contract sattoken1111 · 4 decimals · max supply 100,000,000 SAT (fixed) · current supply 20,000,000 SAT (10M launch LP + 10M airdrop) · issuer smartaadmin1.</p>
+        <p>Contract sattoken1111 · 4 decimals · max supply 100,000,000 SAT (fixed) · all 100,000,000 SAT issued (14 Nov 2026), so nothing more can be minted · issuer smartaadmin1 · 10M launch LP + 10M airdrop circulating; the rest is locked in the vesting (smartavest11) and staking (smartastake1) contracts · not audited.</p>
         <RowTable rows={SAT_ALLOCATION} />
       </section>
       <section className="space-y-1">

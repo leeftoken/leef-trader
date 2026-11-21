@@ -14,10 +14,10 @@ export type Row = [string, string, string?];
 export type Block = { heading: string; intro?: string; rows?: Row[]; bullets?: string[]; note?: string };
 
 export const SAT_ALLOCATION: Row[] = [
-  ["35%", "Locked liquidity (SAT/LEEF, SAT/WAX, SAT/stablecoin)", "Over a third in locked depth, so a large sale moves the price less."],
-  ["25%", "User rewards, released over 4 years", "Slow release avoids a dump and rewards real use."],
-  ["15%", "Treasury (2-of-3 multisig)", "Runway and future pools."],
-  ["15%", "Team, 12-month cliff, 36-month vesting", "Team stays at or under 15% and can't sell early."],
+  ["35%", "Locked liquidity (SAT/LEEF, SAT/WAX, SAT/stablecoin)", "About 10M SAT already in Alcor pools; 25M vests over 4 years from smartavest11 for new liquidity."],
+  ["25%", "User rewards, released over 4 years", "23.75M vests over 4 years from smartavest11 into the smartastake1 reward pot; 1.25M is a staked airdrop fund."],
+  ["15%", "Treasury (2-of-3 multisig)", "Vests over 4 years from smartavest11. Runway and future pools."],
+  ["15%", "Team, 12-month cliff, 36-month vesting", "Locked in smartavest11; team stays at or under 15% and can't sell early."],
   ["10%", "LEEF community airdrop", "Ties SAT to the people who already back LEEF."],
 ];
 
@@ -32,7 +32,10 @@ export const REVENUE_SPLIT: Row[] = [
 export const ACCOUNTS: Row[] = [
   ["sattoken1111", "SAT token contract, controlled by smartaadmin1"],
   ["smartatrader", "Trader / treasury contract: plans, subscriptions, revenue split, buybacks, LP + lock"],
-  ["smartaadmin1", "Admin 2-of-3 multisig, SAT issuer, holds the 10M airdrop SAT"],
+  ["smartaadmin1", "Admin 2-of-3 multisig, SAT issuer, sent the 10M SAT airdrop (9 Nov 2026); beneficiary of the treasury, team and LP vesting streams"],
+  ["smartavest11", "Vesting contract: LP, user-reward, treasury and team streams; claim is permissionless and pays only the fixed beneficiary"],
+  ["smartastake1", "SAT staking and governance: stake, rewards, 7-day unstake cooldown, proposals (not audited)"],
+  ["smartadrop11", "Airdrop fund: 1.25M SAT staked in smartastake1, moves only through a passed proposal"],
   ["smartafees11", "Fee 2-of-3 multisig, owns the locked SAT/LEEF position and claims its fees"],
   ["smartabot111", "Bot account; its bot key can only call buyback, addlp, collectfees, lpwithdraw, pause"],
   ["leefmaincorp", "LEEF token contract"],

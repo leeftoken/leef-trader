@@ -44,7 +44,7 @@ plan today only creates an on-chain subscription record.
 | Token contract | `sattoken1111` (eosio.token-compatible) |
 | Symbol / decimals | SAT, 4 |
 | Max supply | **100,000,000 SAT**, fixed, no inflation |
-| Current supply | **20,000,000 SAT** (10M in the SAT/LEEF launch LP, 10M reserved for the community airdrop) |
+| Current supply | **100,000,000 SAT**, all issued on 14 Nov 2026 (no more can be minted). 10M went to the SAT/LEEF launch LP and 10M to the community airdrop (sent 9 Nov 2026). The rest is locked in the vesting contract `smartavest11` (LP, user rewards, treasury, team) and the staking contract `smartastake1` (1.25M airdrop fund). Not audited. |
 | Issuer | `smartaadmin1` (2-of-3 multisig) |
 
 ### Allocation (35 / 25 / 15 / 15 / 10) and why

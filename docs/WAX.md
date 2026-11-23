@@ -85,6 +85,9 @@ local model never authorizes a live trade.
   payload is never blindly re-broadcast (an HTTP timeout does not mean the
   transaction wasn't accepted). There is exactly one submission attempt;
   every uncertain outcome is resolved by reconciliation, not a retry.
+  Wallet sync does not release that lock. The phases, quorum rules, and
+  desk steps are in
+  [Live capital recovery](./TRADING_ENGINE.md#live-capital-recovery).
 - Wallets: Wharfkit SessionKit with Cloud Wallet + Anchor plugins. The wallet
   prompts per transaction (Cloud Wallet whitelisting of the swap transfers
   enables hands-free use).

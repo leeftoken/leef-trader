@@ -74,7 +74,10 @@ suspension resync) and [WAX](./WAX.md) for chain specifics.
    Alcor router and floor-checked against their on-chain memo min-outs.
 5. Live execution passes the policy firewall, signs (session key or external
    wallet), broadcasts exactly once, then reconciles via RPC + Hyperion —
-   the recorded fill is the chain's actual transfers, not the quote.
+   the recorded fill is the chain's actual transfers, not the quote. An
+   unresolved broadcast keeps the `trade-cycle` capital lock until that
+   reconciliation succeeds; see
+   [Live capital recovery](./TRADING_ENGINE.md#live-capital-recovery).
 6. Everything lands in the decision journal (`store/bot.ts`), including
    predicted-vs-realized edge per strategy.
 7. Between API pulls, the engine's on-chain spot loop patches hot pools from

@@ -61,7 +61,9 @@ strategy signal
                          ONE submission; a timeout locks capital as
                          UNKNOWN with the known txid, never a duplicate
   → reconcile            actual transfers read back from the chain —
-                         positions and P&L settle from chain truth
+                         an unresolved tx stays locked until those
+                         transfers (or a quorum failure) are verified.
+                         See [TRADING ENGINE](./docs/TRADING_ENGINE.md)
   → calibration          predicted vs realized edge recorded per strategy
 ```
 

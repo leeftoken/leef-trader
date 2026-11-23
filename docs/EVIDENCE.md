@@ -73,6 +73,28 @@ profiles** — hindsight has no predicted edge, so they can't fabricate
 calibration. They exist for the audit trail, the desk, and the AI's
 evidence review.
 
+## Unknown live executions
+
+A broadcast timeout journals one live `execution` row with
+`status: "unknown"`, the known txid, and the candidate the bot actually
+signed (`amountIn`, `expectedOut`, tokens, size, route metadata). That row
+is the identity recovery is allowed to trust. Chain activity alone never
+creates one.
+
+Reload can lose the buffered write. `ensureUnknownExecutionJournal`
+restores a single row from the non-secret intent stored on the capital
+lock, and only when the txid is 64 hex and no row exists yet. Duplicate
+rows are kept only when `areEquivalentLiveExecutionRows` says they are the
+same trade: required identity matches, optional metadata matches whenever
+both rows have it, and outcome fields agree within `1e-12`. Equivalent
+`unknown` and `confirmed` copies collapse in `settleUnknownExecution`.
+Conflicting copies fail closed and the capital lock stays.
+
+Recovered fills record chain `actualOut`. They do not invent a realized
+edge the original decision never measured. Backfill rules above still
+apply: `source: "backfill"` never feeds learning. The settlement path is
+[Live capital recovery](./TRADING_ENGINE.md#live-capital-recovery).
+
 ## What it is NOT
 
 - Not a backtester. Recorded decisions can later feed a **decision replay**
